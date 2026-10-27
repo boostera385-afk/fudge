@@ -1,0 +1,32 @@
+{
+  "manifest_version": 3,
+  "name": "Fudge — Review Library",
+  "short_name": "Fudge",
+  "version": "0.29.1",
+  "key": "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAqxwgeeBjUvon4dxrQGWr24KXsqyVLxY9OEhBPI3mb6391O9fYXy57Nu8P8ULlTNPvpMZXO1TFyRFyYfo+PDqp5A/YjdAKUne2b7VPg0wewdMskSyO1APyW76cfUXujlvzdo6+oBoKILE+mijvcXl54KqiuJ5v54TBimNIFo4oYKgFHgNQm6OqmkRekiPRfHujagwcSpankKUtlgeUH05bvH1pcKezDechMbpyv+VB2vw1WRp+g169GtWZ2stnnOARyQgZulozLtB9PZ+ZGSTDvB9Q7ZW7hBpuUGxnRfUNHb/Bky4YSgOz1+qgZ6V5CzQYfvXBRi96TteobxlXFvPdwIDAQAB",
+  "description": "Collect and classify five-star Google reviews, fulfill Sheet requirements, and preserve review inventory.",
+  "permissions": ["activeTab", "alarms", "clipboardWrite", "notifications", "storage", "unlimitedStorage", "sidePanel", "tabs"],
+  "host_permissions": [
+    "https://www.google.com/maps/*",
+    "https://maps.google.com/*",
+    "https://www.google.com/search*",
+    "https://*.googleusercontent.com/*",
+    "https://script.google.com/*",
+    "https://script.googleusercontent.com/*",
+    "https://api.openai.com/*"
+  ],
+  "background": { "service_worker": "background.js" },
+  "action": {
+    "default_title": "Open Fudge",
+    "default_icon": { "16": "assets/logo.png", "32": "assets/logo.png", "48": "assets/logo.png", "128": "assets/logo.png" }
+  },
+  "icons": { "16": "assets/logo.png", "32": "assets/logo.png", "48": "assets/logo.png", "128": "assets/logo.png" },
+  "side_panel": { "default_path": "sidepanel.html" },
+  "content_scripts": [
+    {
+      "matches": ["https://www.google.com/maps/*", "https://maps.google.com/*", "https://www.google.com/search*"],
+      "js": ["shared.js", "content.js"],
+      "run_at": "document_idle"
+    }
+  ]
+}

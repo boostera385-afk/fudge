@@ -1,0 +1,19 @@
+# Local tool artifacts
+.freebuff/
+
+# OS junk
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Editor / IDE
+.vscode/
+.idea/
+*.swp
+
+# Packaging artifacts
+*.zip
+*.crx
+
+# Private keys — never commit
+*.pem

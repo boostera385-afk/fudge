@@ -1,0 +1,206 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Fudge — Review Library</title>
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body class="app">
+
+<!-- Icon sprite. One 24px grid, 1.75 stroke, currentColor. -->
+<svg width="0" height="0" aria-hidden="true" focusable="false" style="position:absolute">
+  <defs>
+    <symbol id="i-library" viewBox="0 0 24 24"><path d="M12 3l9 4.5-9 4.5-9-4.5L12 3Z"/><path d="m3 12.2 9 4.5 9-4.5"/><path d="m3 16.7 9 4.5 9-4.5"/></symbol>
+    <symbol id="i-shield" viewBox="0 0 24 24"><path d="M12 21s7-3.2 7-9V6.2l-7-2.7-7 2.7V12c0 5.8 7 9 7 9Z"/><path d="m9 12 2.2 2.2L15.2 10"/></symbol>
+    <symbol id="i-search" viewBox="0 0 24 24"><circle cx="11" cy="11" r="6.5"/><path d="m16 16 4.5 4.5"/></symbol>
+    <symbol id="i-x" viewBox="0 0 24 24"><path d="m6 6 12 12"/><path d="M18 6 6 18"/></symbol>
+    <symbol id="i-chevron" viewBox="0 0 24 24"><path d="m6 9.5 6 6 6-6"/></symbol>
+    <symbol id="i-chevron-right" viewBox="0 0 24 24"><path d="m9.5 6 6 6-6 6"/></symbol>
+    <symbol id="i-check" viewBox="0 0 24 24"><path d="m5 12.5 4.5 4.5L19 7"/></symbol>
+    <symbol id="i-alert" viewBox="0 0 24 24"><path d="M12 4.5 2.8 20h18.4L12 4.5Z"/><path d="M12 10v4"/><path d="M12 17.2h.01"/></symbol>
+    <symbol id="i-spinner" viewBox="0 0 24 24"><path d="M12 3.5a8.5 8.5 0 1 1-8.5 8.5"/></symbol>
+    <symbol id="i-sheet" viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="16" rx="2.5"/><path d="M3 9.5h18"/><path d="M9.2 9.5V20"/></symbol>
+    <symbol id="i-cloud-up" viewBox="0 0 24 24"><path d="M7.2 18.5h10.3a3.5 3.5 0 0 0 .4-6.98 5.6 5.6 0 0 0-10.7-1.6 4.3 4.3 0 0 0 0 8.58Z"/><path d="M12 16.2v-5.4"/><path d="m9.9 12.9 2.1-2.1 2.1 2.1"/></symbol>
+    <symbol id="i-arrow-ur" viewBox="0 0 24 24"><path d="M7.5 16.5 16.5 7.5"/><path d="M9 7.5h7.5V15"/></symbol>
+    <symbol id="i-image" viewBox="0 0 24 24"><rect x="3" y="4.5" width="18" height="15" rx="2.5"/><circle cx="8.8" cy="10" r="1.6"/><path d="m3.6 17.6 4.9-4.3 4 3.3 3-2.6 4.9 4"/></symbol>
+    <symbol id="i-user" viewBox="0 0 24 24"><circle cx="12" cy="8.2" r="3.7"/><path d="M4.8 20a7.4 7.4 0 0 1 14.4 0"/></symbol>
+    <symbol id="i-expand" viewBox="0 0 24 24"><path d="M4 9V5.5A1.5 1.5 0 0 1 5.5 4H9"/><path d="M15 4h3.5A1.5 1.5 0 0 1 20 5.5V9"/><path d="M20 15v3.5a1.5 1.5 0 0 1-1.5 1.5H15"/><path d="M9 20H5.5A1.5 1.5 0 0 1 4 18.5V15"/></symbol>
+    <symbol id="i-copy" viewBox="0 0 24 24"><rect x="9" y="9" width="11.5" height="11.5" rx="2.5"/><path d="M15 6.4V5.5a2 2 0 0 0-2-2H5.5a2 2 0 0 0-2 2V13a2 2 0 0 0 2 2h.9"/></symbol>
+    <symbol id="i-inbox" viewBox="0 0 24 24"><path d="M3 13.5 5.8 5.2A2 2 0 0 1 7.7 4h8.6a2 2 0 0 1 1.9 1.2L21 13.5"/><path d="M3 13.5h5l1.2 2.2h5.6L16 13.5h5v4.3A2.2 2.2 0 0 1 18.8 20H5.2A2.2 2.2 0 0 1 3 17.8Z"/></symbol>
+    <symbol id="i-star" viewBox="0 0 24 24"><path d="m12 3.6 2.6 5.4 5.9.8-4.3 4.2 1 5.9-5.2-2.8-5.2 2.8 1-5.9L3.5 9.8l5.9-.8L12 3.6Z"/></symbol>
+    <symbol id="i-archive" viewBox="0 0 24 24"><path d="M4 7.5h16v12H4z"/><path d="M3 4h18v3.5H3z"/><path d="M9 12h6"/></symbol>
+    <symbol id="i-trash" viewBox="0 0 24 24"><path d="M4 7h16"/><path d="M9 3.5h6L16.5 7h-9L9 3.5Z"/><path d="m7 7 .8 13h8.4L17 7"/><path d="M10 10.5v6M14 10.5v6"/></symbol>
+  </defs>
+</svg>
+
+  <aside class="rail">
+    <div class="rail__brand"><img src="assets/logo.png" alt="Fudge" /></div>
+    <nav class="rail__nav" aria-label="Sections">
+      <button class="rail__item is-active" aria-current="page" data-tip="Review library">
+        <svg class="icon"><use href="#i-library" /></svg>
+        <span class="sr-only">Review library</span>
+      </button>
+    </nav>
+    <div class="rail__foot">
+      <button class="rail__item" id="rulesButton" data-tip="5★ only · photo required · deduplicated">
+        <svg class="icon"><use href="#i-shield" /></svg>
+        <span class="sr-only">Collection rules</span>
+      </button>
+      <span class="rail__version" id="versionLabel">—</span>
+    </div>
+  </aside>
+
+  <div class="app__main">
+
+    <div class="topbar">
+      <nav class="crumbs" aria-label="Breadcrumb">
+        <span>Fudge</span>
+        <svg class="icon icon--sm"><use href="#i-chevron-right" /></svg>
+        <b>Review library</b>
+      </nav>
+      <span class="pill pill--ok"><i class="dot"></i>Stored locally</span>
+    </div>
+
+    <header class="page-head">
+      <div class="page-head__text">
+        <h1>Review library</h1>
+        <p id="librarySummary">Clean customer proof, ready for wherever you need it.</p>
+      </div>
+      <div class="stat-group" aria-label="Library totals">
+        <div class="stat"><strong class="num" id="totalReviews">0</strong><span>Reviews</span></div>
+        <div class="stat"><strong class="num" id="totalServices">0</strong><span>Services</span></div>
+        <div class="stat stat--muted"><strong class="num" id="totalDuplicates">0</strong><span>Dupes filtered</span></div>
+      </div>
+    </header>
+
+    <div class="toolbar">
+      <div class="toolbar__row">
+        <div class="field field--search">
+          <svg class="icon icon--sm"><use href="#i-search" /></svg>
+          <input id="searchInput" type="search" placeholder="Search review text" aria-label="Search review text" />
+          <button class="field__clear" id="clearSearch" hidden aria-label="Clear search">
+            <svg class="icon icon--sm"><use href="#i-x" /></svg>
+          </button>
+        </div>
+        <div class="select select--sort">
+          <select id="sortSelect" aria-label="Sort reviews">
+            <option value="recent">Newest first</option>
+            <option value="photos">Most photos</option>
+            <option value="length">Longest review</option>
+          </select>
+          <svg class="icon icon--sm"><use href="#i-chevron" /></svg>
+        </div>
+        <div class="toolbar__actions">
+          <button class="btn btn--ghost" id="driveButton">
+            <svg class="icon icon--sm"><use href="#i-cloud-up" /></svg>
+            <span data-label>Save to Drive</span>
+          </button>
+          <button class="btn btn--primary" id="copyButton">
+            <svg class="icon icon--sm"><use href="#i-sheet" /></svg>
+            <span data-label>Copy for Sheets</span>
+          </button>
+        </div>
+      </div>
+      <div class="toolbar__row toolbar__row--status">
+        <div class="status-tabs" id="statusTabs" role="group" aria-label="Review status">
+          <button class="status-tab" data-view="ready" aria-pressed="true">Ready <span id="readyCount">0</span></button>
+          <button class="status-tab" data-view="used" aria-pressed="false">Used <span id="usedCount">0</span></button>
+        </div>
+        <p class="status-help" id="statusHelp">Reviews ready to copy or publish.</p>
+        <button class="btn btn--danger-quiet btn--sm" id="clearUnusedButton">
+          <svg class="icon icon--sm"><use href="#i-trash" /></svg>
+          Clear unused data
+        </button>
+        <button class="btn btn--danger-quiet btn--sm" id="clearUsedButton" hidden>
+          <svg class="icon icon--sm"><use href="#i-trash" /></svg>
+          Clear Used data
+        </button>
+      </div>
+      <div class="toolbar__row toolbar__row--filters">
+        <span class="overline">Service</span>
+        <div class="chips" id="serviceChips" role="group" aria-label="Filter by service"></div>
+      </div>
+    </div>
+
+    <section class="library" id="reviewTable" aria-live="polite" aria-busy="true">
+      <div class="skeleton">
+        <div class="skeleton__row"></div>
+        <div class="skeleton__row"></div>
+        <div class="skeleton__row"></div>
+      </div>
+    </section>
+
+  </div>
+
+  <dialog class="sheet" id="detailSheet">
+    <div class="sheet__top">
+      <div class="group__title">
+        <small id="detailService">Service</small>
+        <h2 id="detailSubcategory">Subcategory</h2>
+      </div>
+      <button class="icon-btn" id="detailClose" aria-label="Close">
+        <svg class="icon icon--sm"><use href="#i-x" /></svg>
+      </button>
+    </div>
+    <div class="sheet__scroll">
+      <div class="sheet__gallery" id="detailGallery"></div>
+      <div class="sheet__body">
+        <blockquote id="detailText"></blockquote>
+        <div class="cell__meta" id="detailMeta"></div>
+        <div class="sheet__links" id="detailLinks"></div>
+        <section class="writer" id="writerPanel" aria-label="Website writer">
+          <header class="writer__head">
+            <span class="overline">Website writer</span>
+            <p class="writer__help">Rewrites this review in the reviewer's own voice — no business names, locations, dates, or foreign phone numbers. Crew names and contact mentions are swapped for yours, and the contact line varies every time so reviews read human.</p>
+          </header>
+          <input class="writer__phone" id="writerPhone" type="text" placeholder="Your phone number(s), comma separated" aria-label="Your phone numbers the writer may use" />
+          <input class="writer__phone" id="writerNames" type="text" placeholder="Your crew names, comma separated (Darwin, Felix, …)" aria-label="Your crew names used to replace the original crew" />
+          <div class="writer__actions">
+            <button class="btn btn--primary btn--sm" id="writerRun">
+              <svg class="icon icon--sm"><use href="#i-copy" /></svg>
+              <span data-label>Rewrite for website</span>
+            </button>
+            <button class="btn btn--ghost btn--sm" id="writerCopy" hidden>Copy rewrite</button>
+          </div>
+          <p class="writer__warnings" id="writerWarnings" role="status" hidden></p>
+          <blockquote class="writer__output" id="writerOutput" hidden></blockquote>
+        </section>
+      </div>
+    </div>
+  </dialog>
+
+  <dialog class="confirm-dialog" id="clearUsedDialog">
+    <div class="confirm-dialog__icon"><svg class="icon"><use href="#i-trash" /></svg></div>
+    <div>
+      <span class="overline">Used section only</span>
+      <h2>Clear Used review data?</h2>
+      <p id="clearUsedCopy">This permanently removes used reviews from Fudge’s local library. Ready reviews and Google Drive files stay untouched.</p>
+    </div>
+    <div class="confirm-dialog__actions">
+      <button class="btn btn--ghost" id="cancelClearUsed">Cancel</button>
+      <button class="btn btn--danger" id="confirmClearUsed">Clear Used data</button>
+    </div>
+  </dialog>
+
+  <dialog class="confirm-dialog" id="clearUnusedDialog">
+    <div class="confirm-dialog__icon"><svg class="icon"><use href="#i-trash" /></svg></div>
+    <div>
+      <span class="overline">Unused section only</span>
+      <h2>Clear unused review data?</h2>
+      <p id="clearUnusedCopy">This permanently removes unused reviews from Fudge’s local library. Used reviews and Google Drive files stay untouched.</p>
+    </div>
+    <div class="confirm-dialog__actions">
+      <button class="btn btn--ghost" id="cancelClearUnused">Cancel</button>
+      <button class="btn btn--danger" id="confirmClearUnused">Clear unused data</button>
+    </div>
+  </dialog>
+
+  <div class="toast" id="toast" role="status" aria-live="polite"></div>
+
+  <script src="shared.js"></script>
+  <script src="config.js"></script>
+  <script src="rewriter.js"></script>
+  <script src="dashboard.js"></script>
+</body>
+</html>
