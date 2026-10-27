@@ -234,6 +234,7 @@ async function render() {
   elements.sheetsState.innerHTML = `<i class="dot"></i>${sheetsConnected ? "Connected" : setupIncomplete ? "Setup incomplete" : "Not connected"}`;
   const collecting = runState === "running";
   const activeTabs = verified?.jobs?.length || 0;
+  const activeJob = verified?.jobs?.[0] || (!verified?.ok && meta.scanJob?.status === "running" ? meta.scanJob : null);
   const cooldownMinutes = Math.max(0, Math.ceil((Date.parse(meta.blockedUntil || "") - Date.now()) / 60000) || 0);
   const stageAge = Date.now() - Date.parse(meta.sheetsStatus?.updatedAt || "");
   const currentStage = Boolean(meta.sheetsStatus?.stage && Number.isFinite(stageAge) && stageAge < 5 * 60_000);
@@ -252,7 +253,7 @@ async function render() {
   // Something that clears itself. Said plainly, without the alarm of an error.
   else if (meta.sheetsStatus?.retrying) elements.sheetsStatus.textContent = meta.sheetsStatus.notice;
   else if (cooldownMinutes) elements.sheetsStatus.textContent = `Google paused collection for about ${cooldownMinutes} more minute${cooldownMinutes === 1 ? "" : "s"}.`;
-  else if (meta.scanJob?.auto && meta.scanJob?.status === "running") elements.sheetsStatus.textContent = `Finding ${meta.scanJob.serviceKeyword} in ${meta.scanJob.city}.`;
+  else if (activeJob?.auto) elements.sheetsStatus.textContent = `${activeJob.stage || "Scanning"} · ${activeJob.serviceKeyword || "Google"}${activeJob.city ? ` · ${activeJob.city}` : ""} · page ${activeJob.currentPage || 1} of ${activeJob.pageLimit || 4}.`;
   else if (currentStage) elements.sheetsStatus.textContent = meta.sheetsStatus.stage;
   else if (collecting && meta.sheetsStatus?.stage) elements.sheetsStatus.textContent = "The Sheet check has not finished. Press Sync now to retry.";
   else if (meta.sheetsStatus?.nextJob) elements.sheetsStatus.textContent = `Next: ${meta.sheetsStatus.nextJob.serviceKeyword} · ${meta.sheetsStatus.nextJob.city}`;

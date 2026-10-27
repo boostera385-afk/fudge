@@ -817,9 +817,11 @@
           location.href = resume.toString();
           return;
         }
-        if (urlPage > Number(job.currentPage || 1)) {
-          job = await updateJob({ stage: `Resuming page ${urlPage}`, currentPage: urlPage, businessIndex: 0, pageAdvanced: true });
-        }
+      }
+      // Commit pagination only after the next document has actually loaded.
+      const loadedPage = resultsPageFromUrl();
+      if (loadedPage > Number(job.currentPage || 1)) {
+        job = await updateJob({ stage: `Resuming page ${loadedPage}`, currentPage: loadedPage, businessIndex: 0, pageAdvanced: true });
       }
       if (job.auto && job.currentPage > 1 && job.businessIndex > 0 && (job.visitedPlaceIds || []).length) {
         const resumeTargets = findBusinessTargets();
@@ -839,7 +841,15 @@
           await finishJob({ stage: "Blocked by Google", blocked: true, businessIndex: job.businessIndex || 0 });
           return;
         }
-        const targets = findBusinessTargets();
+        // A slow or changed results page is not evidence that the city is exhausted.
+        const targets = findBusinessTargets().length ? findBusinessTargets() : await waitFor(() => {
+          const found = findBusinessTargets();
+          return found.length ? found : null;
+        }, 10000, 200);
+        if (!targets) {
+          await finishJob({ stage: "Results did not load — will retry", businessIndex: job.businessIndex || 0 });
+          return;
+        }
         for (let index = job.businessIndex || 0; index < targets.length; index += 1) {
           if (await jobWasStopped(job.id)) return;
           if (googleBlockPage()) {
@@ -938,7 +948,8 @@
         const nextHref = nextAnchor?.href || "";
         const oldUrl = location.href;
         const oldSignature = findBusinessTargets().map((node) => node.getAttribute("data-cid") || Fudge.normalize(textOf(node)).slice(0, 80)).join("|");
-        job = await updateJob({ stage: "Moving to next page", currentPage: job.currentPage + 1, businessIndex: 0, pageAdvanced: true });
+        const nextPage = Number(job.currentPage || 1) + 1;
+        job = await updateJob({ stage: `Loading page ${nextPage}` });
         // A direct navigation is more reliable than clicking the floated inner
         // button. The content script resumes the still-running job after reload.
         if (nextHref && nextHref !== oldUrl) {
@@ -960,6 +971,7 @@
           await finishJob({ stage: "Could not load the next results page" });
           return;
         }
+        job = await updateJob({ stage: `Scanning page ${nextPage}`, currentPage: nextPage, businessIndex: 0, pageAdvanced: true });
       }
     } catch (error) {
       // Anything to do with the extension being reloaded, or a message that went

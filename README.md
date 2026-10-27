@@ -199,7 +199,7 @@ Fudge has exactly **one switch**; the two buttons at the top of the side panel a
 
 - On a Google Maps business or Places results page → scans the page you are looking at.
 - Anywhere else → takes the next outstanding Structure requirement, opens Google Places in a new foreground tab, and begins.
-- Also switches automatic fulfillment **on**: Structure is checked every ~30 seconds while Chrome runs, and Fudge opens Google itself until you press Stop.
+- Also switches automatic fulfillment **on**: Structure is checked every ~30 seconds while Chrome runs, and Fudge opens Google itself until you press Stop. Newly collected reviews also schedule a coalesced sync shortly after a business finishes; network or connector delays can add time.
 
 **Stop collecting** — ends every running scan, closes Fudge's tabs, switches automation off. Reviews already collected stay saved and each scan's position is kept in **Search Progress**, so restarting resumes rather than repeating.
 
@@ -253,7 +253,7 @@ Fudge does not read every review. For each business it sorts the feed by **Highe
 3. **Verify the sort landed** two ways: the control reports Highest **and** on-screen ratings are non-increasing. The click alone is not trusted.
 4. Collect five-star reviews with photos until something below five stars appears — because the order is descending, everything after it rates lower.
 
-After the last business on a page, Fudge follows Google's real `pnnext` link. The next-page checkpoint is written to **Search Progress before navigation**, so a reload onto an older URL restores the saved page instead of repeating page one; if Google reorders results, only the current page restarts and visited Place IDs are skipped. The city completes when the Next control genuinely does not exist or after page 4.
+After the last business on a page, Fudge follows Google's real `pnnext` link. The next-page checkpoint is written to **Search Progress after the new page loads**, so a failed navigation does not skip a page. If Google reorders results, only the current page restarts and visited Place IDs are skipped. The city completes when the Next control genuinely does not exist or after page 4; a job may also stop earlier once its review target is reached.
 
 Against a 32-review test feed holding 7 eligible reviews, the sorted path reads 12 cards in ~0.7 s where the full-feed fallback reads all 32 in ~6.9 s — and both find the same 7.
 
@@ -298,6 +298,8 @@ The **Reviews** tab keeps **Website Copy** (column R) and **Phone** (column S) f
 
 Rephrasing is independent of Chrome: it runs as you edit, under a lock that can neither time out an extension request nor swallow your edit, with the five-minute trigger as backstop. Status is reported to the side panel and **Fudge → Rephrasing status**; **Fudge → Test rephrasing** sends one row and shows the raw API response; the model is overridable with the script property `FUDGE_OPENAI_MODEL`. The connector also fills new or changed requirements from the unused pool and handles `Change it` QC replacement while Fudge is stopped or uninstalled — collecting *new* reviews from Google still requires the extension.
 
+With connector version 40 or newer, extension syncs submit touched Structure rows for rephrasing in a separate request after the Sheet write returns. This keeps OpenAI response time off the sync's critical path; the Sheet's triggers remain a fallback if that request is interrupted. Older connectors continue to rephrase within the write request until upgraded.
+
 ### Setup
 
 Get an OpenAI API key at [platform.openai.com](https://platform.openai.com), refresh the Sheet, choose **Fudge → Set OpenAI API key** (stored in Script properties, never in script source), and deploy the latest connector. If a key was ever kept in `config.js`, remove it and rotate it — extension source files are readable.
@@ -339,7 +341,7 @@ Fudge/
 │   ├── fonts/             # Bundled variable woff2 subsets + license
 │   └── logo.png
 ├── tests/
-│   └── smoke.test.js      # 123 Node smoke tests, zero dependencies
+│   └── smoke.test.js      # Node smoke tests, zero dependencies
 ├── AUDIT.md               # UI audit — decisions behind the redesign
 └── RELIABILITY-AUDIT.md   # Reliability audit — failure modes and their fixes
 ```
@@ -350,11 +352,7 @@ Fudge/
 node tests/smoke.test.js
 ```
 
-Runs **123 smoke tests** with plain Node — no test framework, no npm install. The suite covers used-data isolation, keyword/trade boundaries, QC replacement, transient-retry behavior, connector-version tolerance, parallel tab-job accounting, batch limits, and more.
-
-**Current status:** 121 / 123 passing. Known-failing checks (tracked):
-- `Sheet job count follows tab limit`
-- `outdated connector still syncs`
+Runs the smoke tests with plain Node — no test framework, no npm install. The suite covers used-data isolation, keyword/trade boundaries, QC replacement, transient-retry behavior, connector-version tolerance, parallel tab-job accounting, batch limits, and more.
 
 The suite reads `REQUIRED_CONNECTOR_VERSION` straight from `sheets.js`, so bumping the connector version never breaks a test that only meant "a current connector".
 

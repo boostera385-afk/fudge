@@ -110,13 +110,22 @@ migrateRunState().catch(() => {});
 
 // Several tabs scan at once, so every job is kept under its own id. `scanJob` still
 // mirrors the most recently updated one, because the side panel reads it.
-async function updateScanJob(patch, sender) {
+let jobUpdateChain = Promise.resolve();
+function updateScanJob(patch, sender) {
+  const update = jobUpdateChain.catch(() => {}).then(() => writeScanJob(patch, sender));
+  jobUpdateChain = update.catch(() => {});
+  return update;
+}
+
+async function writeScanJob(patch, sender) {
   const { scanJobs = {}, scanJob = null } = await getLocal({ scanJobs: {}, scanJob: null });
   const tabId = patch.tabId || sender?.tab?.id;
   const id = patch.id
     || Object.values(scanJobs).find((entry) => entry.tabId && entry.tabId === tabId)?.id
     || scanJob?.id;
   const previous = (id && scanJobs[id]) || (id && scanJob?.id === id ? scanJob : null) || {};
+  // A late heartbeat must not resurrect a stopped or completed runner.
+  if (previous.id && previous.status !== "running" && !patch.status) return previous;
   const job = { ...previous, ...patch, id: id || previous.id, tabId: tabId || previous.tabId, updatedAt: new Date().toISOString() };
   // Every update from a live runner renews its lease. Anything else drops it, so a
   // finished, stopped or interrupted job can never look alive.
@@ -151,13 +160,15 @@ async function liveRunningScanJobs(reason = "Restoring from the saved Sheet chec
   const live = [];
   for (const job of (await recordedScanJobs()).filter((entry) => entry?.status === "running")) {
     if (!leaseExpired(job) && await onLivePlacesTab(job)) { live.push(job); continue; }
-    await updateScanJob({ id: job.id, tabId: job.tabId, status: "interrupted", stage: reason });
+    // Keep the running record available for retry if the checkpoint fails.
     // Save where it got to. A run that ends by being interrupted — the tab closed,
     // the worker evicted, Chrome restarted — never recorded its place, so the next
     // run resumed from an older checkpoint and walked the same pages and businesses
     // again. recordProgress refuses to move a checkpoint backwards, so a stale job
     // record here cannot undo newer progress.
-    SheetsService.recordProgress(job, false).catch(() => {});
+    try { if (job.auto) await SheetsService.recordProgress(job, false); }
+    catch (_error) { continue; }
+    await updateScanJob({ id: job.id, tabId: job.tabId, status: "interrupted", stage: reason });
   }
   return live;
 }
@@ -327,6 +338,23 @@ async function startAutomaticJob(spec, { activate = false, pageLimit = 4 } = {})
 
 let automationBusy = false;
 let automationChain = Promise.resolve();
+let reviewSyncTimer = null;
+let reviewSyncPending = false;
+
+// New reviews should reach the Sheet promptly, without one sync per business.
+// If a sync is already running, request exactly one follow-up instead of dropping
+// the update or building an unbounded queue of full Sheet reads.
+function scheduleReviewSync() {
+  reviewSyncPending = true;
+  if (reviewSyncTimer || automationBusy) return;
+  reviewSyncTimer = setTimeout(async () => {
+    reviewSyncTimer = null;
+    if (!reviewSyncPending) return;
+    if (automationBusy) return;
+    reviewSyncPending = false;
+    if (await isRunning()) await runSheetsAutomation({ force: true }).catch(() => {});
+  }, 2000);
+}
 
 // A scheduled pass may be dropped when another run already owns the work. A run a
 // person asked for never may: it waits its turn and then really runs, because
@@ -403,6 +431,7 @@ async function automationPass({ force = false, interactive = false, activate = f
     return status;
   } finally {
     automationBusy = false;
+    if (reviewSyncPending) scheduleReviewSync();
   }
 }
 
@@ -505,6 +534,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       // meanwhile, the message channel closed and the whole run died with
       // "a listener indicated an asynchronous response...".
       sendResponse({ ok: true, job });
+      if (job.auto && message.patch.businessCompleted && Number(message.patch.businessEligible) > 0) scheduleReviewSync();
       if (!job.auto || !(message.patch.businessCompleted || message.patch.pageAdvanced)) return;
       const writes = [SheetsService.recordProgress(job, false)];
       if (message.patch.businessCompleted) {

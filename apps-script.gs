@@ -7,7 +7,7 @@ const FUDGE_SECRET = "__FUDGE_SECRET__";
 // Bumped whenever this connector's required behavior changes. Fudge reads it from
 // every response so it can tell you when the copy inside your Sheet is older than
 // the extension expects, instead of failing with an unhelpful error.
-const FUDGE_CONNECTOR_VERSION = 39;
+const FUDGE_CONNECTOR_VERSION = 40;
 const FUDGE_WRITER_PROMPT_VERSION = 23;
 const FUDGE_DEFAULT_MALE_NAMES = ["James", "Michael", "Daniel", "David", "Matthew", "Ryan", "Jason", "Andrew", "Brian", "Kevin"];
 const FUDGE_CTA_TEMPLATE_COUNT = 12;
@@ -148,8 +148,16 @@ function doPost(e) {
       }
       case "batchWrite": {
         const written = withLock_(function () { return batchWrite_(request.updates || []); });
+        // The extension can finish syncing without waiting on OpenAI. It starts a
+        // separate request for these rows; the Sheet triggers remain a fallback.
+        if (request.deferRephrase) return json_(Object.assign(publicResult_(written), { touchedRows: written.touchedRows || [] }));
         const rephrased = rephraseTouched_(written);
         return json_(Object.assign(publicResult_(written), { rephrased: rephrased }));
+      }
+      case "rephraseRows": {
+        const rows = (Array.isArray(request.rows) ? request.rows : []).map(Number)
+          .filter(function (row) { return Number.isInteger(row) && row >= 2; }).slice(0, 200);
+        return json_({ ok: true, rephrased: rephraseTouched_({ touchedRows: rows }) });
       }
       case "appendRows": return json_(withLock_(function () { return appendRows_(request.tab, request.rows || []); }));
       case "writerSettings": return json_(saveWriterSettings_(request));

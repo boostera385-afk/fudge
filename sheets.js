@@ -6,7 +6,7 @@ const SheetsService = (() => {
   const SERVICE_HEADERS = ["Service Keyword", "Status", "Reviews Collected", "Notes", "Search Term", "Business Name Keywords", "Review Keywords", "Required Review Keywords", "Google Filter Keywords", "Exclude Keywords", "Service Family", "Subcategory", "Topic Filter Required", "Collect Family Reviews", "Rewrite Service Phrase", "Equivalent Service Phrases"];
   // The connector lives inside the user's spreadsheet, so it can be older than the
   // extension. Anything above version 1 knows about the Cities and Services tabs.
-  const REQUIRED_CONNECTOR_VERSION = 39;
+  const REQUIRED_CONNECTOR_VERSION = 40;
   // The selected tab limit controls how many distinct keywords the Sheet returns.
   const DEFAULT_PARALLEL_JOBS = 3;
   const MAX_PARALLEL_JOBS = 6;
@@ -308,14 +308,20 @@ const SheetsService = (() => {
     return { ok: true, rephrased: Number(result.rephrased) || 0, pending: Number(result.pending) || 0, automation: result.automation || null };
   }
 
-  async function batchGet(_spreadsheetId, ranges) {
-    const result = await remote("read", { ranges });
+  async function batchGet(_spreadsheetId, ranges, driving = false) {
+    const result = await remote("read", { ranges, driving });
     if (result.automation) connectorAutomation = result.automation;
     return result.values || ranges.map(() => []);
   }
-  async function batchWrite(_spreadsheetId, data) {
+  async function batchWrite(_spreadsheetId, data, deferRephrase = false) {
     if (!data.length) return { totalUpdatedRows: 0 };
-    return remote("batchWrite", { updates: data });
+    const result = await remote("batchWrite", { updates: data, deferRephrase });
+    if (deferRephrase && Array.isArray(result.touchedRows) && result.touchedRows.length) {
+      // The one-minute Sheet automation and five-minute rephrase trigger remain
+      // fallbacks if the worker is stopped before this independent request finishes.
+      remote("rephraseRows", { rows: result.touchedRows }).catch(() => {});
+    }
+    return result;
   }
   async function appendRows(_spreadsheetId, tab, rows) {
     if (!rows.length) return null;
@@ -436,7 +442,7 @@ const SheetsService = (() => {
   async function syncPass(options = {}) {
     syncing = true;
     try {
-      const settings = await chrome.storage.local.get({ sheetsDatabase: null, runState: "", sheetsAutomation: false });
+      const settings = await chrome.storage.local.get({ sheetsDatabase: null, runState: "", sheetsAutomation: false, parallelTabs: DEFAULT_PARALLEL_JOBS });
       if (!settings.sheetsDatabase?.spreadsheetId) return { ok: false, needsSetup: true, error: "Connect the Fudge spreadsheet first." };
       const running = settings.runState ? settings.runState === "running" : Boolean(settings.sheetsAutomation);
       if (!running && !options.force) return { ok: true, paused: true };
@@ -446,13 +452,13 @@ const SheetsService = (() => {
       let connectorOutdated = false;
       let readValues;
       try {
-        readValues = await batchGet(spreadsheetId, [...coreRanges, ...extraRanges]);
+        readValues = await batchGet(spreadsheetId, [...coreRanges, ...extraRanges], running);
       } catch (error) {
         // An older connector does not know these tabs and refuses the whole request.
         // Fall back to the tabs it does know so everything else keeps working.
         if (!/invalid fudge (range|tab)/i.test(error.message)) throw error;
         connectorOutdated = true;
-        readValues = [...(await batchGet(spreadsheetId, coreRanges)), ...extraRanges.map(() => [])];
+        readValues = [...(await batchGet(spreadsheetId, coreRanges, running)), ...extraRanges.map(() => [])];
       }
       if (connectorVersion && connectorVersion < REQUIRED_CONNECTOR_VERSION) connectorOutdated = true;
       const [structureRows, reviewRows, progressRows, cityRows, serviceRows] = readValues;
@@ -808,7 +814,7 @@ const SheetsService = (() => {
           updates.push({ range: `Cities!A${city.rowNumber}:E${city.rowNumber}`, values: [city.row] });
         });
       }
-      if (updates.length) await batchWrite(spreadsheetId, updates);
+      if (updates.length) await batchWrite(spreadsheetId, updates, true);
       if (localReviews.length) {
         // A content scan can finish while this Sheet sync is writing. Re-read the
         // library and merge only the Sheet-owned status fields so a stale sync
@@ -942,7 +948,16 @@ const SheetsService = (() => {
     } finally { syncing = false; }
   }
 
-  async function recordProgress(job, exhausted = false) {
+  // Serialize read-modify-write checkpoints from parallel runners and completion
+  // handlers so a late response cannot overwrite a newer checkpoint.
+  let progressChain = Promise.resolve();
+  function recordProgress(job, exhausted = false) {
+    const write = progressChain.catch(() => {}).then(() => writeProgress(job, exhausted));
+    progressChain = write.catch(() => {});
+    return write;
+  }
+
+  async function writeProgress(job, exhausted = false) {
     const { sheetsDatabase = null } = await chrome.storage.local.get({ sheetsDatabase: null });
     if (!sheetsDatabase?.spreadsheetId || !job?.searchKey) return;
     const [rows] = await batchGet(sheetsDatabase.spreadsheetId, ["'Search Progress'!A2:I"]);
@@ -957,7 +972,7 @@ const SheetsService = (() => {
     const page = Math.max(1, Number(job.currentPage) || 1);
     const businessIndex = Math.max(0, Number(job.businessIndex) || 0);
     const behind = stored && (page < storedPage || (page === storedPage && businessIndex < storedIndex));
-    if (behind && !exhausted) return;
+    if (behind) return;
     // Visited businesses are only ever added to, never dropped, so a run that ends
     // early cannot make Fudge forget where it has already been.
     const visited = [...new Set([...clean(stored ? stored[7] : "").split("|").filter(Boolean), ...(job.visitedPlaceIds || [])])];
@@ -968,7 +983,7 @@ const SheetsService = (() => {
       job.query || (stored ? stored[3] : ""),
       behind ? storedPage : page,
       behind ? storedIndex : businessIndex,
-      exhausted ? "Yes" : "No",
+      exhausted || Fudge.normalize(stored?.[6]) === "yes" ? "Yes" : "No",
       visited.join("|"),
       now()
     ]];

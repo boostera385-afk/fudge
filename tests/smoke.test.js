@@ -417,6 +417,14 @@ async function testSheetJobCountFollowsTabLimit() {
   }
 }
 
+async function testActiveSyncSignalsAllocationOwnership() {
+  const { calls } = await runSheetsSync({ structureRows: [["REQ-2", "Self Write", "Dryer Repair", ""]], reviewRows: [] });
+  const primaryRead = calls.find((call) => call.action === "read" && call.ranges.some((range) => range.startsWith("Structure!")));
+  assert.equal(primaryRead.driving, true, "an active sync must tell the connector that Chrome owns allocation");
+  const write = calls.find((call) => call.action === "batchWrite");
+  assert.equal(write.deferRephrase, true, "ordinary sync must not wait for AI rephrasing");
+}
+
 // A sync that changes nothing must write nothing. Every Structure row used to be
 // rewritten every minute whether or not anything had happened to it: Updated At
 // churned on rows nobody had touched, and the connector reformatted and re-read the
@@ -1322,6 +1330,8 @@ async function testOutdatedConnectorStillSyncs() {
   };
   const context = sheetsContext(store, oldConnector);
   const result = await context.__SheetsService.sync({ force: true });
+  // Header maintenance runs asynchronously so it never delays collection.
+  await new Promise((resolve) => setTimeout(resolve, 10));
 
   assert.equal(result.ok, true, "an outdated connector must not break the whole sync");
   assert.equal(result.connectorOutdated, true, "and the UI must be able to say so");
@@ -2156,7 +2166,8 @@ function testLiveGoogleRegressions() {
   assert.match(content, /document\.querySelector\("a#pnnext\[href\]/, "pagination must use Google's real pnnext anchor");
   assert.match(content, /nextPageButton\(\) \|\| await waitFor\(nextPageButton/, "pagination must wait briefly before declaring a city exhausted");
   assert.match(content, /location\.href = nextHref/, "the next page href must be followed directly even when the anchor has a zero-size box");
-  assert.match(content, /pageAdvanced: true/, "a page transition must be checkpointed before navigation");
+  assert.match(content, /loadedPage > Number\(job\.currentPage \|\| 1\)[\s\S]{0,180}pageAdvanced: true/, "a page transition is checkpointed after the new page loads");
+  assert.match(content, /Results did not load — will retry/, "an unloaded results page must not be declared exhausted");
   assert.match(background, /businessCompleted \|\| message\.patch\.pageAdvanced/, "page checkpoints must be written to Search Progress");
   assert.doesNotMatch(content, /searchParams\.set\("start",\s*"0"\)/, "result reordering must not restart the city from page one");
   assert.match(content, /Results changed — safely resuming page/, "reordered results should restart only the current page");
@@ -2166,7 +2177,7 @@ function testLiveGoogleRegressions() {
   assert.match(background, /const onLivePlacesTab = async \(job\) => \{[\s\S]*chrome\.tabs\.get\(job\.tabId\)/, "a stale running job must be checked before blocking resume");
   assert.match(background, /if \(!leaseExpired\(job\) && await onLivePlacesTab\(job\)\) \{ live\.push\(job\); continue; \}/, "a live runner is left alone");
   assert.match(background, /await updateScanJob\(\{ id: job\.id, tabId: job\.tabId, status: "interrupted"/, "only the dead runner is interrupted, never a sibling still scanning");
-  assert.match(background, /status: "interrupted"[\s\S]{0,500}?SheetsService\.recordProgress\(job, false\)/, "an interrupted runner must save where it got to, or the next run walks the same pages again");
+  assert.match(background, /await SheetsService\.recordProgress\(job, false\)[\s\S]{0,160}status: "interrupted"/, "save a dead runner's checkpoint before releasing it");
   // Stop is unconditional now. Making it depend on the mirrored job left automation
   // switched on, and the alarm reopened tabs a minute after the user stopped.
   assert.match(background, /if \(message\?\.type === "STOP_SCAN_JOB"\)[\s\S]*?await setLocal\(\{ runState: RUN_STATE_STOPPED, sheetsAutomation: false \}\);/, "Stop must switch collecting off whatever state the jobs are in");
@@ -2473,11 +2484,28 @@ function testSheetConnectorInstallsIndependentTriggers() {
   // The root of the lock timeouts: both halves filling the same rows every minute.
   assert.match(script, /function fudgeProcessQueue[\s\S]{0,200}?if \(extensionIsDriving_\(\)\)/, "the Sheet must stand down from allocating while the extension is driving");
   assert.match(readAction, /readRanges_[\s\S]*?if \(request\.driving\) noteExtensionSync_\(\)/, "only a successful active read should mark the extension as driving");
-  assert.match(script, /case "batchWrite": \{[\s\S]{0,300}?rephraseTouched_\(written\)/, "rows the extension just wrote must be rephrased in the same request");
+  assert.match(script, /case "batchWrite": \{[\s\S]*?request\.deferRephrase[\s\S]*?rephraseTouched_\(written\)/, "writes support deferred rephrasing and preserve the synchronous fallback");
   assert.match(script, /case "processQueue": return json_\(runQueueNow_\(\)\)/, "the Sheet must expose a manual fill");
   assert.match(script, /case "rephraseNow": return json_\(rephraseEverythingNow_\(\)\)/, "the Sheet must expose a manual rephrase");
   assert.match(script, /function fudgeInstallAutomation\(\)/, "automation must also be installable directly from Apps Script");
   assert.doesNotMatch(script, /autoResizeColumn/, "Fudge must preserve user-defined Sheet column widths");
+}
+
+function testDeferredConnectorRephrasing() {
+  let rephrased = 0;
+  const context = { ContentService: { MimeType: { JSON: "json" }, createTextOutput: (text) => ({ text, setMimeType() { return this; } }) } };
+  vm.createContext(context);
+  vm.runInContext(fs.readFileSync(path.join(root, "apps-script.gs"), "utf8").replace('"__FUDGE_SECRET__"', JSON.stringify(SECRET)), context);
+  context.withLock_ = (work) => work();
+  context.batchWrite_ = () => ({ ok: true, touchedRows: [2, 3], structureSheet: {} });
+  context.rephraseTouched_ = (result) => { rephrased += 1; return result.touchedRows.length; };
+  const request = (action, extra = {}) => JSON.parse(context.doPost({ postData: { contents: JSON.stringify({ secret: SECRET, action, ...extra }) } }).text);
+  const fast = request("batchWrite", { updates: [], deferRephrase: true });
+  assert.deepEqual(fast.touchedRows, [2, 3]);
+  assert.equal(rephrased, 0, "sync must not wait for OpenAI");
+  assert.equal(request("rephraseRows", { rows: [2, 3, -1, "invalid"] }).rephrased, 2);
+  assert.equal(rephrased, 1, "the independent request still rephrases the touched rows");
+  assert.equal(request("batchWrite", { updates: [] }).rephrased, 2, "older clients retain synchronous rephrasing");
 }
 
 function testConnectorReadDoesNotRunQueue() {
@@ -3038,6 +3066,33 @@ async function testClosingTheRunnerTabEndsItsJob() {
   await new Promise((resolve) => setTimeout(resolve, 5));
   const { scanJobs } = await store.local.get({ scanJobs: {} });
   assert.equal(scanJobs.live.status, "interrupted", "a closed tab must end its job");
+}
+
+async function testConcurrentJobUpdatesAndLateHeartbeat() {
+  const store = storage({ runState: "running", scanJobs: {
+    a: { id: "a", tabId: 1, status: "running" },
+    b: { id: "b", tabId: 2, status: "running" }
+  } });
+  const context = backgroundContext(store);
+  await Promise.all([
+    context.updateScanJob({ id: "a", businessIndex: 3 }),
+    context.updateScanJob({ id: "b", businessIndex: 7 })
+  ]);
+  assert.equal(store.data.scanJobs.a.businessIndex, 3);
+  assert.equal(store.data.scanJobs.b.businessIndex, 7);
+  await context.updateScanJob({ id: "a", status: "stopped" });
+  await context.updateScanJob({ id: "a", businessIndex: 4 });
+  assert.equal(store.data.scanJobs.a.status, "stopped", "late runner messages must not revive stopped work");
+  assert.equal(store.data.scanJobs.a.businessIndex, 3);
+}
+
+async function testNewReviewsTriggerCoalescedSync() {
+  const store = storage({ runState: "running", scanJobs: { a: { id: "a", tabId: 1, status: "running", auto: true } } });
+  let syncs = 0;
+  const context = backgroundContext(store, { sync: async () => { syncs += 1; return { ok: true, nextJobs: [] }; } });
+  await Promise.all([1, 2, 3].map(() => askBackground(context, { type: "SCAN_JOB_UPDATE", patch: { id: "a", businessCompleted: true, businessEligible: 1 } })));
+  await new Promise((resolve) => setTimeout(resolve, 30));
+  assert.equal(syncs, 1, "new reviews should trigger one coalesced sync rather than wait for the alarm");
 }
 
 // A tab is opened before the runner inside it can report for duty. A worker evicted
@@ -3863,6 +3918,8 @@ function testTransientRephraseFailureIsRetriedLater() {
     ["collecting card ignores page detection", testCollectingCardIgnoresPageDetection],
     ["stale running jobs release their slot", testStaleRunningJobsReleaseTheirSlot],
     ["closing the runner tab ends its job", testClosingTheRunnerTabEndsItsJob],
+    ["concurrent jobs and late heartbeat", testConcurrentJobUpdatesAndLateHeartbeat],
+    ["new reviews trigger coalesced sync", testNewReviewsTriggerCoalescedSync],
     ["orphan runner tabs are closed", testOrphanRunnerTabsAreClosed],
     ["stop is unconditional", testStopIsUnconditional],
     ["completed keyword still uploads pictures", testCompletedKeywordStillUploadsPictures],
@@ -3905,6 +3962,7 @@ function testTransientRephraseFailureIsRetriedLater() {
     ["duplicate review cannot fill two rows", testDuplicateReviewCannotFillTwoRows],
     ["self write rows without cities still queue work", testSelfWriteRowsWithoutCitiesStillQueueWork],
     ["Sheet job count follows tab limit", testSheetJobCountFollowsTabLimit],
+    ["active sync signals allocation ownership", testActiveSyncSignalsAllocationOwnership],
     ["an unchanged sync writes nothing", testAnUnchangedSyncWritesNothing],
     ["picture links stay in one cell", testPictureLinksStayInOneCell],
     ["Drive upload keeps photo positions", testDriveUploadKeepsPhotoPositions],
@@ -3974,6 +4032,7 @@ function testTransientRephraseFailureIsRetriedLater() {
     ["Sheet-only queue matching", testSheetOnlyQueueMatching],
     ["Sheet-only queue uses managed rules", testSheetOnlyQueueUsesManagedRules],
     ["Sheet connector installs independent triggers", testSheetConnectorInstallsIndependentTriggers],
+    ["connector defers rephrasing safely", testDeferredConnectorRephrasing],
     ["connector read leaves queue work to extension", testConnectorReadDoesNotRunQueue],
     ["busy automation skips without lock timeout", testBusyAutomationSkipsWithoutLockTimeout],
     ["connector does not rewrite inventory automatically", testConnectorRewritesNewReviewInSheet],
