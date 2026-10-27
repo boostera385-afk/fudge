@@ -11,6 +11,8 @@
 
 **Fudge** is a Chrome/Edge Manifest V3 extension that collects and classifies five-star Google reviews, keeps a deduplicated local review library, and automatically fulfills a Google Sheets work queue — opening Google itself, scanning the right businesses, and filing the right reviews into your spreadsheet while you do something else.
 
+For the proposed Supabase-backed source Sheet → cleanup → ND Master → automation workflow, see the [recommended setup and implementation plan](docs/RECOMMENDED-WORKFLOW.md). This architecture is a proposal and is not yet implemented.
+
 ---
 
 ## 🏷️ Tags
