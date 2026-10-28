@@ -1,0 +1,53 @@
+<!doctype html>
+<html lang="en">
+<head><meta charset="UTF-8" /><meta name="viewport" content="width=device-width, initial-scale=1" /><title>Fudge — ND Backend Intake</title><link rel="stylesheet" href="styles.css" /></head>
+<body class="setup-page">
+  <main class="setup-shell">
+    <header class="setup-head"><div class="brand"><span class="brand-name">Fudge</span></div><a class="text-link" href="dashboard.html">Local review library</a></header>
+    <section class="setup-hero"><span class="overline">Optional backend setup</span><h1>Keep local. Connect deliberately.</h1><p>Connect your existing verified ND dashboard staff account. Original reviews and the current Sheets workflow stay local-first. This build does not release uploads or migrate historical reviews.</p></section>
+    <p class="setup-note" id="backendStatus" role="status" aria-live="polite">Checking saved state…</p>
+    <div class="setup-grid">
+      <section class="setup-card">
+        <header class="setup-card__head"><span class="setup-step">1</span><h2>Sign in to the shared backend</h2></header>
+        <p>Project: <code>xtefjnfdjnxwrpkoydaj</code>. Only this project's optional network permission will be requested. Use a publishable key, never a personal access token, secret key or service-role key.</p>
+        <form id="signInForm" class="setup-card">
+          <label class="setup-label" for="publishableKey">Project publishable key</label><input class="input" id="publishableKey" required autocomplete="off" spellcheck="false" placeholder="sb_publishable_…" />
+          <label class="setup-label" for="email">Dashboard account email</label><input class="input" id="email" type="email" required autocomplete="username" />
+          <label class="setup-label" for="password">Password</label><input class="input" id="password" type="password" required autocomplete="current-password" />
+          <button class="btn btn--primary" type="submit">Grant project permission and sign in</button>
+        </form>
+        <p class="setup-note">Passwords are not stored. Access/refresh tokens stay in trusted extension-session storage, not in content scripts or persistent local storage. Browser restart or extension reload requires sign-in again; the queue remains on disk.</p>
+        <button class="btn btn--ghost" id="signOut" type="button">Sign out and pause uploads</button>
+      </section>
+      <section class="setup-card">
+        <header class="setup-card__head"><span class="setup-step">2</span><h2>Select the intended workspace</h2></header>
+        <p>Workspaces are loaded from your authenticated staff memberships. Choosing one never starts collection or uploads historical records. Changing account/workspace does not retarget old queued data.</p>
+        <button class="btn btn--ghost" id="loadWorkspaces" type="button">Load authorized workspaces</button>
+        <label class="setup-label" for="workspace">Workspace</label><select class="input" id="workspace"><option value="">Sign in to load choices</option></select>
+        <button class="btn btn--ghost" id="selectWorkspace" type="button">Select workspace and keep paused</button>
+      </section>
+      <section class="setup-card">
+        <header class="setup-card__head"><span class="setup-step">3</span><h2>Intake release and queue</h2></header>
+        <p id="releaseStatus">Uploads are release-gated until the schema is reviewed/deployed and a pilot is approved. No live intake RPC is called by this build.</p>
+        <label class="setup-note"><input type="checkbox" id="uploadConsent" /> I authorize original review-data upload to the selected organization, including author names and image URLs, and have reviewed rights/retention.</label>
+        <button class="btn btn--primary" id="enableUploads" type="button" disabled>Enable subsequent captures and upload</button>
+        <button class="btn btn--ghost" id="pauseUploads" type="button">Pause capture and uploads</button>
+        <button class="btn btn--ghost" id="refreshStatus" type="button">Refresh queue status</button>
+        <button class="btn btn--ghost" id="retryUploads" type="button">Retry repairable blocked intents</button>
+        <button class="btn btn--ghost" id="drainUploads" type="button">Process one released batch</button>
+        <ul class="setup-instructions" id="blockedItems" aria-label="First twenty blocked local intents"></ul>
+      </section>
+      <section class="setup-card">
+        <header class="setup-card__head"><span class="setup-step">4</span><h2>Separate historical and cleanup actions</h2></header>
+        <label class="setup-note"><input type="checkbox" id="historyConsent" /> Separately queue the current existing library for the selected organization.</label>
+        <button class="btn btn--ghost" id="queueHistory" type="button" disabled>Queue historical library (release required)</button>
+        <p class="setup-note">Backend snapshots are separate from the local library. Before clearing local review data, pause and cancel unwanted pending snapshots here. Clearing the library does not delete backend records. A current request may finish before a pause/cancel takes effect.</p>
+        <label class="setup-note"><input type="checkbox" id="cancelConsent" /> Pause and cancel this target's pending/blocked snapshots. Leave local originals and already stored backend records unchanged.</label>
+        <button class="btn btn--danger-quiet" id="cancelPending" type="button">Cancel pending target snapshots</button>
+      </section>
+    </div>
+    <p class="setup-note">No publishing, customer approval, browser profile creation or Sheet writeback is enabled by intake setup. Missing Google review IDs remain blocked for repair; fingerprints are never silently treated as Google IDs.</p>
+  </main>
+  <script src="backend-setup.js"></script>
+</body>
+</html>

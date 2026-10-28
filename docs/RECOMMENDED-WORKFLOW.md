@@ -1,6 +1,6 @@
 # Recommended workflow and implementation plan
 
-> **Proposal, not an implemented feature.** Fudge currently uses local browser storage and the Google Apps Script/Sheets connector. The Supabase backend, approval queue, ND Master integration, Incogniton integration, and results checker described here still need to be designed, implemented, and tested. The precise sheet columns, cleanup rules, and automation destination remain to be confirmed.
+> **Mostly a proposal.** Existing collection uses local storage and Sheets. The shared [Supabase intake schema](../supabase/README.md) is deployed and an opt-in uploader is implemented, but upload release remains off pending acceptance/policy/pilot gates. Dashboard draft/approval and monitoring foundations exist; the connected review, ND Master writeback, publishing and results workflow remains incomplete. Use [the master plan](MASTER-AUTOMATION-PLAN.md) and implementation-status records for current scope. The older per-user SQL is not the shared deployment contract.
 
 ## Goal
 

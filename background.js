@@ -1,4 +1,6 @@
+importScripts("backend-contract.js");
 importScripts("shared.js", "config.js", "rewriter.js", "sheets.js");
+importScripts("backend-service.js", "backend-worker.js");
 
 const SHEETS_ALARM = "fudge-sheets-sync";
 const MAX_RESULT_PAGES = 4;

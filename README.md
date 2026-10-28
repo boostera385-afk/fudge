@@ -11,7 +11,11 @@
 
 **Fudge** is a Chrome/Edge Manifest V3 extension that collects and classifies five-star Google reviews, keeps a deduplicated local review library, and automatically fulfills a Google Sheets work queue — opening Google itself, scanning the right businesses, and filing the right reviews into your spreadsheet while you do something else.
 
-For the proposed Supabase-backed source Sheet → cleanup → ND Master → automation workflow, see the [recommended setup and implementation plan](docs/RECOMMENDED-WORKFLOW.md). This architecture is a proposal and is not yet implemented.
+For the complete cross-system implementation guide, start with the [Fudge + ND Master Automation Plan](docs/MASTER-AUTOMATION-PLAN.md). It covers ingestion, cleanup, approval, Sheets, local execution, profiles, checks, comments, controlled reposting, recovery and phased acceptance. This is a plan, not delivered end-to-end automation.
+
+The [optional ND backend setup and durable uploader](docs/BACKEND-UPLOADER.md) is implemented with local/mock tests. Open **ND backend intake → Setup** after reloading this unpacked extension. The shared intake schema is deployed; **upload release stays off** pending browser acceptance, policy decisions and a pilot. Opening setup or signing in never migrates the existing library. Collection and Sheets behavior remain unchanged.
+
+For the proposed Supabase-backed source Sheet → cleanup → ND Master → automation workflow, see the [recommended setup and implementation plan](docs/RECOMMENDED-WORKFLOW.md). The [shared raw-ingestion schema](supabase/README.md) is deployed, but extension uploads remain off and the complete cross-system workflow is not delivered. The older per-user SQL is superseded; do not apply it to the shared project.
 
 ---
 
@@ -352,6 +356,7 @@ Fudge/
 
 ```bash
 node tests/smoke.test.js
+node --test tests/backend.test.js
 ```
 
 Runs the smoke tests with plain Node — no test framework, no npm install. The suite covers used-data isolation, keyword/trade boundaries, QC replacement, transient-retry behavior, connector-version tolerance, parallel tab-job accounting, batch limits, and more.
@@ -390,7 +395,7 @@ The `/exec` URL never changes, so nothing needs re-pasting. Every connector retu
 
 ## 🔒 Privacy
 
-Fudge stores collected review data and Used status **locally in the browser** via `chrome.storage.local`. Data survives closing and reopening Chrome and persists until the extension is removed, its site data is cleared, or a confirmed **Clear unused data** / **Clear Used data** action runs. When connected, Fudge sends structured review data and selected image URLs **only** to the Apps Script web app deployed inside your own Google account. OpenAI receives text solely during an explicit rewrite/rephrase request, honoring the caching and rules above.
+Fudge stores collected review data and Used status **locally in the browser** via `chrome.storage.local`. Data survives closing and reopening Chrome and persists until the extension is removed, its site data is cleared, or a confirmed **Clear unused data** / **Clear Used data** action runs. The existing Sheets connection sends structured review data and selected image URLs to the Apps Script web app deployed inside your own Google account. Optional ND backend sign-in sends credentials only to the pinned shared project's Supabase Auth endpoint; passwords are not stored and user tokens stay in trusted session storage. Backend upload release is currently off. A later approved release plus explicit consent may upload original-field snapshots and author/photo provenance to the selected organization. Queued snapshots/backend copies are separate from library deletion; pause/cancel unwanted pending snapshots first. See [backend privacy/lifecycle details](docs/BACKEND-UPLOADER.md). OpenAI receives text solely during an explicit rewrite/rephrase request, honoring the caching and rules above.
 
 ## ⚖️ Responsible use
 

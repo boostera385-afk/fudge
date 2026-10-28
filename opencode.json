@@ -1,0 +1,17 @@
+{
+  "$schema": "https://opencode.ai/config.json",
+  "permissions": [
+    { "action": "supabase_apply_migration", "resource": "*", "effect": "ask" },
+    { "action": "supabase_execute_sql", "resource": "*", "effect": "ask" },
+    { "action": "supabase_deploy_edge_function", "resource": "*", "effect": "ask" },
+    { "action": "shell", "resource": "git push *", "effect": "ask" }
+  ],
+  "mcp": {
+    "servers": {
+      "supabase": {
+        "type": "remote",
+        "url": "https://mcp.supabase.com/mcp?project_ref=xtefjnfdjnxwrpkoydaj&features=database,docs,development,debugging,functions"
+      }
+    }
+  }
+}

@@ -725,11 +725,20 @@ const Fudge = (() => {
   }));
   // A silent write failure (quota exceeded, storage evicted) is indistinguishable
   // from "it never saved". Surface it so the UI can report it instead.
-  const saveReviews = (reviews) => new Promise((resolve, reject) => chrome.storage.local.set({ reviews }, () => {
+  const saveReviews = async (reviews, capturedReviews = []) => {
+    const writes = { reviews };
+    if (capturedReviews.length && globalThis.FudgeBackendContract) {
+      const { fudgeBackendConfig = null } = await chrome.storage.local.get({ fudgeBackendConfig: null });
+      // Collection and immutable per-capture intents use the SAME local write.
+      // Unique intent keys avoid cross-tab append/read-modify-write queue races.
+      Object.assign(writes, FudgeBackendContract.captureWrites(fudgeBackendConfig, capturedReviews));
+    }
+    return new Promise((resolve, reject) => chrome.storage.local.set(writes, () => {
     const failure = chrome.runtime.lastError;
     if (failure) reject(new Error(failure.message || "Could not write to local storage."));
     else resolve(reviews);
-  }));
+    }));
+  };
   // Releasing a review is recorded, not just inferred from an empty usedAt. The
   // Sheet is shared with the Apps Script connector, so "this library has no usedAt"
   // on its own cannot tell an intentional release apart from a local copy that
@@ -814,7 +823,7 @@ const Fudge = (() => {
       if (matchIndex < accepted.length) accepted[matchIndex] = upgraded;
       else merged[matchIndex - accepted.length] = upgraded;
     });
-    await saveReviews([...accepted, ...merged]);
+    await saveReviews([...accepted, ...merged], incoming);
     return { accepted: accepted.length, acceptedIds: accepted.map((review) => review.id), duplicates, total: merged.length + accepted.length };
   };
   return { SERVICES, normalize, originalPhotoUrl, driveFileId, driveShareLink, hash, classify, serviceIdentity, setServiceRules, defaultServiceRule, classifyForKeyword, matchesServiceKeyword, shouldCollectSpecialistInventory, businessMatchesKeyword, businessKeywordMatchScore, topicKeywordMatchScore, requiresTopicMatch, isCatchAllClassification, reviewMentionsKeyword, keywordMatchScore, searchTermFor, buildSearchQuery, reviewKey, reviewContentKey, getReviews, saveReviews, setReviewUsed, clearUsedReviews, clearUnusedReviews, addReviews };

@@ -1,0 +1,75 @@
+# Fudge backend implementation status
+
+## Shared database handoff — 2026-10-28
+
+Session returned to Fudge at the user's request. The dashboard already applied
+workspace/revision intake through MCP as hosted `20261028203642`, source
+`supabase/migrations/20261028203213_fudge_ingestion_v1.sql` in that repository.
+Its local 521-test suite/build and rollback-only hosted intake/RLS smoke passed;
+those are dashboard-session results, not a new MCP verification from this folder.
+
+No separate Fudge database or duplicate migration is needed. Preserved the older
+per-user SQL/tests unchanged, with prominent superseded/do-not-deploy guidance in
+`supabase/README.md` and `SUPABASE-FOUNDATION.md`. Added project-local OAuth MCP
+configuration for the same project with SQL/migration/deploy approval prompts.
+MCP reconnected automatically and was verified from this folder: correct project
+URL, seven migrations including `20261028203642`, both intake tables and the RPC
+present, zero public tables without RLS. No new hosted write, real
+source upload or release-gate change was performed from Fudge. Next: reconnect
+MCP, verify existing history/contract, then continue browser acceptance and policy
+gates rather than applying the old migration. Existing code remains unchanged.
+
+## P2 extension slice — 2026-10-28
+
+Session moved to the Fudge repository at the user's request before extension edits.
+Existing uncommitted work was preserved. Optional backend Auth/workspace UI,
+immutable local capture intents, MV3 alarm/startup recovery, bounded uploader,
+strict receipts, retries, session refresh, pause/cancel and target isolation are
+implemented in source. See `BACKEND-UPLOADER.md` for exact behavior and limits.
+
+**Upload release is false in `backend-worker.js`.** No user-source intake RPC,
+historical migration, hosted DDL, live login, customer browser/profile action,
+Sheet write/import, commit or push was performed. Auth/workspace and upload tests
+use mocked HTTP/storage. Signing in remains an explicit optional user action;
+opening the setup page alone makes no network request.
+
+Credentials: no password or user Auth tokens in persistent local storage. Tokens
+are limited to trusted extension-session storage; browser restart/reload requires
+sign-in. Only public publishable configuration is remembered persistently. Optional
+host permission is pinned to `xtefjnfdjnxwrpkoydaj`, not wildcard Supabase hosts.
+
+Collection retains existing local/Sheets behavior. With a future released/consented
+target, raw allowlisted observations and their per-capture intents use one local
+write; old receipts cannot clear newer capture keys. Cancellation epochs prevent
+late writes captured under retired consent from uploading after resume. Local
+library deletion is distinct from queue cancellation/backend deletion; both clear
+dialogs now disclose that boundary. No silent storage-cap dropping is implemented.
+
+### Validation actually run
+
+- `node --test tests/backend.test.js`: **33 tests PASS**.
+- `node tests/smoke.test.js`: **127 existing smoke tests PASS**.
+- `node --check` for contract, service, worker, setup, shared and background files:
+  PASS; service checked again after final refresh-handling change.
+- One-off offline cross-repository comparison: extension and dashboard collector
+  projections agree on seven valid/invalid/extra-field fixtures. No network.
+- Setup DOM bindings, exact internal sender gate, optional host permissions and
+  false production release gate tested. Fake releases enabled only inside unit
+  service fixtures, not the production worker.
+- Both saved master-plan copies remain identical. `git diff --check` passes with
+  existing Windows line-ending warnings.
+
+An initial smoke test expected the exact legacy importScripts call; resolved by
+keeping that call unchanged and adding backend imports before/after it, not by
+weakening the assertion. Actual Chrome/Edge UI, permissions, real session refresh,
+service-worker eviction/crash and intake pilot are **not live-accepted**.
+
+### Next gates
+
+1. Reload/review the existing unpacked extension (same identity, no reinstall).
+2. Review backend contract, retention/deletion/storage policy and migration draft.
+3. Use an approved local/staging PostgreSQL/CLI workflow for concurrency/advisors;
+   separately approve any hosted deployment. No database reset/replay.
+4. Run real Chrome/Edge Auth/permission/queue recovery acceptance on fixtures.
+5. Separately approve a small intake pilot and reviewed release-gate change.
+   Keep historical upload off unless explicitly requested. **P2 is not complete.**
