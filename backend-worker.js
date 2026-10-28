@@ -25,6 +25,7 @@
     BACKEND_SIGN_IN: (m) => service.signIn({ publishableKey: m.publishableKey, email: m.email, password: m.password }),
     BACKEND_WORKSPACES: () => service.workspaces(),
     BACKEND_SELECT_WORKSPACE: (m) => service.selectWorkspace(m.organizationId),
+    BACKEND_TEST_CONNECTION: () => service.testConnection(),
     BACKEND_ENABLE: (m) => service.setEnabled(m.enabled === true, m.confirmed === true),
     BACKEND_SIGN_OUT: () => service.signOut(),
     BACKEND_QUEUE_HISTORY: (m) => service.queueHistory(m.confirmed === true),

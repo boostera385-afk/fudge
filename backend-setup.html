@@ -25,10 +25,12 @@
         <button class="btn btn--ghost" id="loadWorkspaces" type="button">Load authorized workspaces</button>
         <label class="setup-label" for="workspace">Workspace</label><select class="input" id="workspace"><option value="">Sign in to load choices</option></select>
         <button class="btn btn--ghost" id="selectWorkspace" type="button">Select workspace and keep paused</button>
+        <button class="btn btn--ghost" id="testConnection" type="button">Test backend reads (no upload)</button>
+        <p class="setup-note" id="connectionResult" role="status" aria-live="polite">Not tested. This checks staff access and empty table reads only, not upload acceptance.</p>
       </section>
       <section class="setup-card">
         <header class="setup-card__head"><span class="setup-step">3</span><h2>Intake release and queue</h2></header>
-        <p id="releaseStatus">Uploads are release-gated until the schema is reviewed/deployed and a pilot is approved. No live intake RPC is called by this build.</p>
+        <p id="releaseStatus">Uploads stay release-gated until browser acceptance, policy review and a pilot are approved. No live intake RPC is called by this build.</p>
         <label class="setup-note"><input type="checkbox" id="uploadConsent" /> I authorize original review-data upload to the selected organization, including author names and image URLs, and have reviewed rights/retention.</label>
         <button class="btn btn--primary" id="enableUploads" type="button" disabled>Enable subsequent captures and upload</button>
         <button class="btn btn--ghost" id="pauseUploads" type="button">Pause capture and uploads</button>

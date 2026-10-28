@@ -124,6 +124,25 @@
       await setStatus("paused", "Workspace selected. Old targets stay separate; no historical source was queued.");
       return status();
     }
+    async function testConnection() {
+      const config = await configValue();
+      if (!C.validTarget(config)) throw new BackendError("configuration", "Select the intended workspace before testing backend reads.");
+      const auth = await ensureSession();
+      if (auth.userId !== config.userId || await verifyUser(auth) !== config.userId
+        || !(await workspaces(auth)).some((o) => o.id === config.organizationId)) throw new BackendError("permission", "Sign in as verified staff for the selected target before testing reads.");
+      // LIMIT 0 checks the authenticated table/column surface without retrieving
+      // originals, counts or customer rows. Never probe readiness with an intake POST.
+      const tables = [
+        ["reporting_fudge_records", "id,organization_id,source,source_review_id"],
+        ["reporting_fudge_revisions", "id,organization_id,record_id,revision,payload_sha256,observed_at,received_at,received_by"],
+      ];
+      for (const [table, columns] of tables) {
+        const result = await request(`/rest/v1/${table}?select=${columns}&organization_id=eq.${config.organizationId}&limit=0`, auth);
+        if (!Array.isArray(result) || result.length !== 0) throw new BackendError("response", "Read-check response was unexpected. No source was uploaded or acknowledged.");
+      }
+      return { ok: true, projectRef: C.PROJECT_REF, organizationId: config.organizationId, checkedAt: now(),
+        checks: ["verified_staff", "records_read_surface", "revisions_read_surface"], uploadsReleased: releaseUploads };
+    }
     async function setEnabled(enabled, confirmed) {
       const config = await configValue();
       if (!C.validTarget(config)) throw new BackendError("configuration", "Select a workspace first.");
@@ -228,6 +247,7 @@
     return {
       status, signIn: (input) => serial(() => signIn(input)), workspaces: () => serial(async () => ({ ok: true, workspaces: await workspaces(await ensureSession()) })),
       selectWorkspace: (org) => serial(() => selectWorkspace(org)), setEnabled: (enabled, confirmed) => serial(() => setEnabled(enabled, confirmed)),
+      testConnection: () => serial(testConnection),
       signOut: () => serial(signOut), queueHistory: (confirmed) => serial(() => queueHistory(confirmed)), retryBlocked: () => serial(retryBlocked), cancelPending: (confirmed) => serial(() => cancelPending(confirmed)),
       drain: () => {
         if (draining) return Promise.resolve({ ok: true, busy: true });

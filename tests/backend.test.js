@@ -49,6 +49,7 @@ function setup({ released = true, initialConfig = config, signedIn = true } = {}
     if (url.includes("/auth/v1/token?")) return json({ access_token: "fixture-new-access-private", refresh_token: "fixture-new-refresh-private", expires_in: 3600 });
     if (url.includes("/reporting_memberships?")) return json([{ organization_id: org, role: "operator" }, { organization_id: otherOrg, role: "admin" }]);
     if (url.includes("/reporting_organizations?")) return json([{ id: org, name: "Fixture workspace" }, { id: otherOrg, name: "Other fixture workspace" }]);
+    if (/\/reporting_fudge_(records|revisions)\?/.test(url)) return json([]);
     if (url.includes("/auth/v1/logout?")) return new Response(null, { status: 204 });
     if (url.endsWith("/rpc/reporting_ingest_fudge_reviews_v1")) {
       const body = JSON.parse(options.body);
@@ -367,4 +368,81 @@ test("all setup controls bind to actual HTML elements without inline script hand
   for (const match of source.matchAll(/field\("([A-Za-z0-9_-]+)"\)/g)) assert.ok(html.includes(`id="${match[1]}"`), `Missing setup element ${match[1]}`);
   assert.ok(!/\bon(?:click|submit|change)=/i.test(html));
   assert.ok(!/<script[^>]+src="https?:/i.test(html));
+});
+test("read diagnostic works with release off and never changes queue, consent or target", async () => {
+  const f = setup({ released: false, initialConfig: { ...config, enabled: false } });
+  const before = structuredClone(f.local.data);
+  const result = await f.service.testConnection();
+  assert.deepEqual(result, { ok: true, projectRef: C.PROJECT_REF, organizationId: org, checkedAt: clock,
+    checks: ["verified_staff", "records_read_surface", "revisions_read_surface"], uploadsReleased: false });
+  assert.deepEqual(f.local.data, before);
+  assert.equal(f.calls.length, 5);
+  assert.ok(f.calls.every((c) => c.options.method === "GET" && !c.options.body && !c.url.includes("/rpc/")));
+  const reads = f.calls.filter((c) => c.url.includes("/reporting_fudge_"));
+  assert.equal(reads.length, 2);
+  for (const call of reads) {
+    const url = new URL(call.url);
+    assert.equal(url.origin, C.ORIGIN);
+    assert.equal(url.searchParams.get("organization_id"), `eq.${org}`);
+    assert.equal(url.searchParams.get("limit"), "0");
+    assert.equal(call.options.redirect, "error");
+  }
+  assert.ok(!JSON.stringify(result).includes("fixture-access-private"));
+});
+test("read diagnostic requires selected target and a private session before network access", async () => {
+  const missing = setup({ initialConfig: null });
+  await assert.rejects(missing.service.testConnection(), /Select the intended workspace/);
+  assert.equal(missing.calls.length, 0);
+  const signedOut = setup({ signedIn: false });
+  await assert.rejects(signedOut.service.testConnection(), /Sign in again/);
+  assert.equal(signedOut.calls.length, 0);
+});
+test("read diagnostic refuses mismatched session owner without querying source tables", async () => {
+  const f = setup(); f.session.data.fudgeBackendSession.userId = otherUser;
+  await assert.rejects(f.service.testConnection(), /verified staff/);
+  assert.equal(f.calls.length, 0);
+});
+test("read diagnostic verifies current identity instead of accepting only local session metadata", async () => {
+  const f = setup();
+  f.handle(async () => json({ id: otherUser, email_confirmed_at: "2026-10-27T00:00:00Z" }));
+  await assert.rejects(f.service.testConnection(), /verified staff/);
+  assert.equal(f.calls.length, 1);
+  assert.ok(f.calls[0].url.endsWith("/auth/v1/user"));
+});
+test("read diagnostic checks current membership before probing intake tables", async () => {
+  const f = setup();
+  f.handle(async (url) => {
+    if (url.endsWith("/auth/v1/user")) return json({ id: user, email_confirmed_at: "2026-10-27T00:00:00Z" });
+    return json([]);
+  });
+  await assert.rejects(f.service.testConnection(), /verified staff/);
+  assert.ok(!f.calls.some((c) => c.url.includes("/reporting_fudge_")));
+});
+test("read diagnostic handles missing, denied and malformed table responses without leaking bodies", async () => {
+  for (const [status, data, code] of [[404, {}, "schema"], [403, {}, "permission"], [503, {}, "transient"], [200, {}, "response"], [200, [{ text: "DO_NOT_DISPLAY_SOURCE" }], "response"]]) {
+    const f = setup();
+    f.handle(async (url) => {
+      if (url.endsWith("/auth/v1/user")) return json({ id: user, email_confirmed_at: "2026-10-27T00:00:00Z" });
+      if (url.includes("/reporting_memberships?")) return json([{ organization_id: org, role: "operator" }]);
+      if (url.includes("/reporting_organizations?")) return json([{ id: org, name: "Fixture" }]);
+      return json(data, status);
+    });
+    const before = structuredClone(f.local.data);
+    await assert.rejects(f.service.testConnection(), (error) => error.code === code && !error.message.includes("DO_NOT_DISPLAY_SOURCE"));
+    assert.deepEqual(f.local.data, before);
+    assert.ok(!f.calls.some((c) => c.url.includes("/rpc/")));
+  }
+});
+test("read diagnostic command is restricted to the internal setup sender", () => {
+  const listeners = [];
+  const event = () => ({ addListener() {} });
+  const chrome = { storage: { local: {}, session: { async setAccessLevel() {} }, onChanged: event() },
+    runtime: { id: "fixture-extension", getURL: (p) => `chrome-extension://fixture-extension/${p}`, onInstalled: event(), onStartup: event(), onMessage: { addListener: (fn) => listeners.push(fn) } },
+    alarms: { async get() { return {}; }, async create() {}, onAlarm: event() } };
+  const context = { chrome, FudgeBackendContract: C, fetch() { throw new Error("No network"); },
+    FudgeBackendService: { BackendError: Error, create() { return { testConnection() { throw new Error("Must not be called"); } }; } } };
+  vm.createContext(context); vm.runInContext(fs.readFileSync(path.join(root, "backend-worker.js"), "utf8"), context);
+  let result;
+  listeners[0]({ type: "BACKEND_TEST_CONNECTION" }, { id: "fixture-extension", url: "https://www.google.com/maps" }, (value) => { result = value; });
+  assert.equal(result.ok, false);
 });

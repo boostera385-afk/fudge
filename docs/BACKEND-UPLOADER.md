@@ -40,6 +40,14 @@ are preserved. The matching server design is the dashboard repository's
    There is no message/checkbox override for the false release constant. Auth
    review is not an intake pilot. Use the dashboard for account recovery; no
    account/membership is created or self-assigned here.
+6. After signing in and selecting a workspace, **Test backend reads (no upload)**
+   re-verifies the user and staff membership, then requests `limit=0` on the two
+   intake tables scoped to that workspace. It retrieves no review rows and never
+   calls the intake RPC. Its result is temporary and cleared on sign-in,
+   sign-out or workspace selection. A pass checks only the current authenticated
+   read surface; it does not prove cross-tenant RLS, write acceptance, browser
+   recovery or upload release readiness. A missing schema, denied access or network
+   problem is reported without displaying server response bodies.
 
 ## Credentials and session lifecycle
 
@@ -115,6 +123,9 @@ They cover release/consent, target/account isolation, refresh/restart, retry,
 receipt/capture races, cancellation, write failure, size/count limits and trusted
 controls. They do not prove real Chrome/Edge permission UI, worker eviction,
 extension reload, live Auth or hosted database/browser acceptance.
+The optional read diagnostic is additionally covered by mocked identity, staff
+membership, empty-row reads, denied/missing/malformed responses and internal-sender
+tests. It has not been tested with a real extension sign-in or browser permission.
 
 Before changing `UPLOAD_RELEASED` in `backend-worker.js`:
 

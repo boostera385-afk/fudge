@@ -2,6 +2,7 @@
 const field = (id) => document.getElementById(id);
 let busy = false;
 function message(text) { field("backendStatus").textContent = text; }
+function clearConnectionCheck() { field("connectionResult").textContent = "Not tested for the current selection. Test backend reads explicitly; this never releases uploads."; }
 function choices(list) {
   field("workspace").replaceChildren();
   for (const item of list || []) {
@@ -25,7 +26,7 @@ async function refresh() {
   for (const entry of state.blockedItems || []) {
     const item = document.createElement("li"); item.textContent = `${entry.localId || "Unidentified local source"}: ${entry.reason}`; field("blockedItems").append(item);
   }
-  field("releaseStatus").textContent = state.releaseUploads ? "Release enabled for reviewed backend deployment. Uploads still require explicit consent and workspace selection." : "Uploads are release-gated until backend deployment and pilot approval. This build never sends intake RPCs, including after sign-in.";
+  field("releaseStatus").textContent = state.releaseUploads ? "Release enabled for reviewed backend deployment. Uploads still require explicit consent and workspace selection." : "The shared schema is deployed; uploads remain gated pending browser acceptance, policy review and pilot approval. This build never sends intake RPCs, including after sign-in or read checks.";
 }
 async function act(work) {
   if (busy) return;
@@ -41,14 +42,25 @@ field("signInForm").addEventListener("submit", (event) => {
   const password = field("password").value;
   field("password").value = "";
   act(async () => {
+    clearConnectionCheck();
     if (!(await permission)) throw new Error("Project network permission was not granted. Nothing was connected.");
     const result = await send("BACKEND_SIGN_IN", { publishableKey: field("publishableKey").value.trim(), email: field("email").value.trim(), password });
     choices(result.workspaces);
   });
 });
 field("loadWorkspaces").addEventListener("click", () => act(async () => choices((await send("BACKEND_WORKSPACES")).workspaces)));
-field("selectWorkspace").addEventListener("click", () => act(() => send("BACKEND_SELECT_WORKSPACE", { organizationId: field("workspace").value })));
-field("signOut").addEventListener("click", () => act(async () => { await send("BACKEND_SIGN_OUT"); choices([]); }));
+field("selectWorkspace").addEventListener("click", () => act(async () => { clearConnectionCheck(); await send("BACKEND_SELECT_WORKSPACE", { organizationId: field("workspace").value }); }));
+field("signOut").addEventListener("click", () => act(async () => { clearConnectionCheck(); await send("BACKEND_SIGN_OUT"); choices([]); }));
+field("testConnection").addEventListener("click", () => act(async () => {
+  field("connectionResult").textContent = "Checking verified staff access and empty table reads…";
+  try {
+    const result = await send("BACKEND_TEST_CONNECTION");
+    field("connectionResult").textContent = `Read checks passed for workspace ${result.organizationId} at ${new Date(result.checkedAt).toISOString()}. No source rows fetched or uploaded. This does not test intake writes, prove RLS isolation or release uploads.`;
+  } catch (error) {
+    field("connectionResult").textContent = "Read checks did not pass. Review the setup error; nothing was uploaded or acknowledged.";
+    throw error;
+  }
+}));
 field("enableUploads").addEventListener("click", () => act(() => send("BACKEND_ENABLE", { enabled: true, confirmed: field("uploadConsent").checked })));
 field("pauseUploads").addEventListener("click", () => act(() => send("BACKEND_ENABLE", { enabled: false })));
 field("refreshStatus").addEventListener("click", () => act(async () => {}));

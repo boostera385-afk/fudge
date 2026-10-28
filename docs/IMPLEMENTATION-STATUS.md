@@ -1,5 +1,23 @@
 # Fudge backend implementation status
 
+## Read-only connection diagnostic — 2026-10-28
+
+Added an explicit **Test backend reads (no upload)** action on the extension setup
+page. It verifies the current authenticated user and staff workspace membership,
+then requests two workspace-filtered `limit=0` intake-table reads; it never calls
+the intake RPC, fetches source rows, changes consent/target/queue or bypasses the
+release flag. The result is ephemeral and reset when identity/target is changed;
+the UI explicitly distinguishes a read pass from write/RLS/browser acceptance.
+Server error bodies and tokens are not displayed. Auth refresh may update the
+trusted private session when required, but the check does not persist credentials.
+
+Validation actually run: `node --test tests/backend.test.js` **40 PASS**, including
+seven new mock tests for release-off read checks, target/session/identity/member
+denials, malformed/denied/missing responses and trusted sender; `node
+tests/smoke.test.js` **127 PASS**. No real browser Auth/permission/REST call was
+performed. Live signed-in UI and response acceptance remain pending. Existing
+collection and Sheets behavior are unchanged; uploads stay release-gated off.
+
 ## Shared database handoff — 2026-10-28
 
 Session returned to Fudge at the user's request. The dashboard already applied
