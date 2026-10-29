@@ -1,4 +1,4 @@
-importScripts("backend-contract.js");
+importScripts("backend-contract.js", "backend-public-config.js");
 importScripts("shared.js", "config.js", "rewriter.js", "sheets.js");
 importScripts("backend-service.js", "backend-worker.js");
 

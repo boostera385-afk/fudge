@@ -1,5 +1,50 @@
 # Fudge backend implementation status
 
+## P3 receipt visibility handoff — 2026-10-29
+
+Setup now displays at most 20 newest saved acknowledgment receipts for the current
+target, with record ID, revision ID/number and local acknowledgment time only.
+Invalid metadata and other business targets are excluded; no original payload,
+author details or tokens are included. These are local saved receipts, not a fresh
+backend verification or proof of full queue delivery. The dashboard's new staff-only
+`/dashboard/fudge` shows bounded backend receipt metadata for manual ID comparison;
+automated reconciliation, keywords and review/writeback remain incomplete.
+Validation actually run: 51 backend tests and 127 smoke tests PASS. No live intake
+or signed-in UI acceptance performed; upload release remains false. This milestone
+is committed independently in each owning repository, not as a combined repo.
+
+## Shared verification email handoff — 2026-10-29
+
+The dashboard repository now has regenerated Fudge + ND branded Auth templates
+and setup instructions at `supabase/templates/README.md`. No hosted Auth settings
+were changed; real Site URL, SMTP/domain setup and delivery acceptance remain
+pending. Verification requires a deliberate confirmation-page click, then separate
+Fudge sign-in; it does not release intake or create shared-team membership. Dashboard
+validation for this slice: 524 tests / 31 files, typecheck, lint and build PASS.
+No Fudge source changed in the email-template slice; its prior 49/127 results are
+historical, not rerun email-delivery evidence.
+
+## Simplified shared email account — 2026-10-29
+
+Fudge now uses the same public Supabase app identity as the ND dashboard's ignored
+`.env.local`: pinned project `xtefjnfdjnxwrpkoydaj`. A public-only config generator
+copies no server-side settings/secrets. Removed the API-key input from setup;
+added email/password signup with email verification instructions and shared login.
+Signup never accepts returned tokens as an extension session. Passwords remain
+unstored; existing trusted session storage and upload gates are unchanged.
+
+Single-business sign-in auto-selects the authorized business paused; multi-business
+selection remains under Advanced. No RLS/organization schema was removed. First-time
+verified users can explicitly create an empty private business through the existing
+guarded RPC; no shared membership is self-assigned. Both apps share credentials,
+not browser sessions. No live signup, membership creation, intake write or deployment
+was performed. Read-only Auth settings show email enabled, signup enabled and email
+autoconfirm false; delivery/templates/redirect acceptance remains a live test.
+
+Validation: 49 backend fixture tests PASS, 127 smoke tests PASS, setup/worker syntax
+and diff whitespace checks PASS. Real browser signup/login/email and first-account
+setup are not yet accepted. Prior dated sections below are historical.
+
 ## Read-only connection diagnostic — 2026-10-28
 
 Added an explicit **Test backend reads (no upload)** action on the extension setup

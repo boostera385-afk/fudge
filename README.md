@@ -15,6 +15,12 @@ For the complete cross-system implementation guide, start with the [Fudge + ND M
 
 The [optional ND backend setup and durable uploader](docs/BACKEND-UPLOADER.md) is implemented with local/mock tests. Open **ND backend intake → Setup** after reloading this unpacked extension. The shared intake schema is deployed; **upload release stays off** pending browser acceptance, policy decisions and a pilot. Opening setup or signing in never migrates the existing library. Collection and Sheets behavior remain unchanged.
 
+**Shared email account:** Fudge and the ND dashboard use the same Supabase project
+and email/password account. Sign up once, verify your email, then sign in separately
+in each app. No API-key entry is needed. A single authorized business connects
+automatically paused; new users can explicitly set up an empty private business
+account. Advanced selection remains available for users with multiple businesses.
+
 For the proposed Supabase-backed source Sheet → cleanup → ND Master → automation workflow, see the [recommended setup and implementation plan](docs/RECOMMENDED-WORKFLOW.md). The [shared raw-ingestion schema](supabase/README.md) is deployed, but extension uploads remain off and the complete cross-system workflow is not delivered. The older per-user SQL is superseded; do not apply it to the shared project.
 
 ---

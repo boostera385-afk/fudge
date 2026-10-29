@@ -83,14 +83,22 @@
       const { fudgeBackendStatus = {}, fudgeBackendPublishableKey = "", fudgeBackendCancelEpochs = {} } = await local.get({ fudgeBackendStatus: {}, fudgeBackendPublishableKey: "", fudgeBackendCancelEpochs: {} });
       const counts = { pending: 0, blocked: 0, acknowledged: 0, cancelled: 0, otherTargets: 0 };
       const blockedItems = [];
+      const recentReceipts = [];
       for (const [, entry] of await entries()) {
         if (!C.validTarget(config) || entry.targetId !== config.targetId || entry.userId !== config.userId || entry.organizationId !== config.organizationId) { counts.otherTargets++; continue; }
         if (["pending", "blocked"].includes(entry.status) && fudgeBackendCancelEpochs[entry.targetId] && C.cancellationEpoch(entry) !== fudgeBackendCancelEpochs[entry.targetId]) { counts.cancelled++; continue; }
         if (Object.hasOwn(counts, entry.status) && entry.status !== "otherTargets") counts[entry.status]++;
         if (entry.status === "blocked" && blockedItems.length < 20) blockedItems.push({ localId: typeof entry.localId === "string" ? entry.localId.slice(0, 512) : "", reason: typeof entry.reason === "string" ? entry.reason.slice(0, 500) : "Source needs review." });
+        if (entry.status === "acknowledged" && C.uuid(entry.receipt?.record_id) && C.uuid(entry.receipt?.revision_id)
+          && Number.isSafeInteger(entry.receipt.revision) && entry.receipt.revision > 0
+          && Number.isFinite(entry.acknowledgedAt) && entry.acknowledgedAt >= 0 && entry.acknowledgedAt <= 8640000000000000) {
+          recentReceipts.push({ recordId: entry.receipt.record_id, revisionId: entry.receipt.revision_id, revision: entry.receipt.revision, acknowledgedAt: entry.acknowledgedAt });
+          recentReceipts.sort((a, b) => b.acknowledgedAt - a.acknowledgedAt || a.revisionId.localeCompare(b.revisionId));
+          if (recentReceipts.length > 20) recentReceipts.pop();
+        }
       }
       return { ok: true, releaseUploads, signedIn: Boolean(auth), userId: auth?.userId || null, enabled: config?.enabled === true,
-        organizationId: config?.organizationId || null, publishableKey: keyValid(fudgeBackendPublishableKey) ? fudgeBackendPublishableKey : "", counts, blockedItems,
+        organizationId: config?.organizationId || null, publishableKey: keyValid(fudgeBackendPublishableKey) ? fudgeBackendPublishableKey : "", counts, blockedItems, recentReceipts,
         state: fudgeBackendStatus.state || "off", reason: fudgeBackendStatus.reason || "" };
     }
     async function signIn({ publishableKey, email, password }) {
@@ -103,11 +111,31 @@
       const auth = tokenResponse(value, publishableKey);
       auth.userId = await verifyUser(auth);
       const choices = await workspaces(auth);
-      if (!choices.length) throw new BackendError("permission", "No authorized staff workspace was found. Ask the dashboard owner to review membership.");
       await session.set({ fudgeBackendSession: auth });
       // The publishable key is public application identity, not an Auth credential.
       await local.set({ fudgeBackendPublishableKey: publishableKey });
-      await setStatus("paused", "Signed in. Select the intended workspace; uploading remains off.");
+      if (choices.length === 1) await selectWorkspace(choices[0].id);
+      await setStatus("paused", choices.length === 1 ? "Signed in. Your account is connected; uploads remain off." : choices.length ? "Choose the intended business account in advanced settings; uploads remain off." : "Signed in. Set up a private business account, or ask your existing team owner for access.");
+      return { ok: true, workspaces: choices };
+    }
+    async function signUp({ publishableKey, email, password }) {
+      if (!keyValid(publishableKey) || typeof email !== "string" || !email.includes("@") || email.length > 254
+        || typeof password !== "string" || password.length < 12 || password.length > 128) throw new BackendError("invalid", "Enter your email and a password of 12–128 characters.");
+      // Verification uses the project's configured Site URL, shared with dashboard
+      // signup. Never accept a signup response as an authenticated extension session.
+      await request("/auth/v1/signup", { publishableKey }, { email, password });
+      return { ok: true, message: "If registration is available for this address, check your email and verify it, then sign in here or in the ND dashboard. If already registered, sign in instead." };
+    }
+    async function createAccount() {
+      const auth = await ensureSession();
+      if (await verifyUser(auth) !== auth.userId) throw new BackendError("permission", "Sign in again before account setup.");
+      let choices = await workspaces(auth);
+      if (!choices.length) {
+        await request("/rest/v1/rpc/reporting_create_workspace", auth, { workspace_name: "My business" });
+        choices = await workspaces(auth);
+      }
+      if (choices.length !== 1) throw new BackendError("permission", "Account setup needs review. Use advanced settings to choose an existing business; do not create duplicates.");
+      await selectWorkspace(choices[0].id);
       return { ok: true, workspaces: choices };
     }
     async function selectWorkspace(organizationId) {
@@ -245,7 +273,7 @@
       return status();
     }
     return {
-      status, signIn: (input) => serial(() => signIn(input)), workspaces: () => serial(async () => ({ ok: true, workspaces: await workspaces(await ensureSession()) })),
+      status, signIn: (input) => serial(() => signIn(input)), signUp: (input) => serial(() => signUp(input)), createAccount: () => serial(createAccount), workspaces: () => serial(async () => ({ ok: true, workspaces: await workspaces(await ensureSession()) })),
       selectWorkspace: (org) => serial(() => selectWorkspace(org)), setEnabled: (enabled, confirmed) => serial(() => setEnabled(enabled, confirmed)),
       testConnection: () => serial(testConnection),
       signOut: () => serial(signOut), queueHistory: (confirmed) => serial(() => queueHistory(confirmed)), retryBlocked: () => serial(retryBlocked), cancelPending: (confirmed) => serial(() => cancelPending(confirmed)),

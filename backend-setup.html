@@ -4,27 +4,32 @@
 <body class="setup-page">
   <main class="setup-shell">
     <header class="setup-head"><div class="brand"><span class="brand-name">Fudge</span></div><a class="text-link" href="dashboard.html">Local review library</a></header>
-    <section class="setup-hero"><span class="overline">Optional backend setup</span><h1>Keep local. Connect deliberately.</h1><p>Connect your existing verified ND dashboard staff account. Original reviews and the current Sheets workflow stay local-first. This build does not release uploads or migrate historical reviews.</p></section>
+    <section class="setup-hero"><span class="overline">Fudge + ND account</span><h1>One account. Both apps.</h1><p>Use the same email and password in Fudge and the ND dashboard. Verify your email before signing in. Local reviews and Sheets stay unchanged; uploads remain off.</p></section>
     <p class="setup-note" id="backendStatus" role="status" aria-live="polite">Checking saved state…</p>
     <div class="setup-grid">
       <section class="setup-card">
         <header class="setup-card__head"><span class="setup-step">1</span><h2>Sign in to the shared backend</h2></header>
-        <p>Project: <code>xtefjnfdjnxwrpkoydaj</code>. Only this project's optional network permission will be requested. Use a publishable key, never a personal access token, secret key or service-role key.</p>
+        <p>Connected to the same backend as the ND dashboard. No database URL or API key to enter.</p>
         <form id="signInForm" class="setup-card">
-          <label class="setup-label" for="publishableKey">Project publishable key</label><input class="input" id="publishableKey" required autocomplete="off" spellcheck="false" placeholder="sb_publishable_…" />
-          <label class="setup-label" for="email">Dashboard account email</label><input class="input" id="email" type="email" required autocomplete="username" />
+          <label class="setup-label" for="email">Email</label><input class="input" id="email" type="email" required maxlength="254" autocomplete="username" />
           <label class="setup-label" for="password">Password</label><input class="input" id="password" type="password" required autocomplete="current-password" />
-          <button class="btn btn--primary" type="submit">Grant project permission and sign in</button>
+          <button class="btn btn--primary" type="submit">Sign in</button>
+          <button class="btn btn--ghost" id="signUp" type="button">Create account and send verification email</button>
         </form>
+        <p class="setup-note" id="authResult" role="status" aria-live="polite">New account? Use a password of 12–128 characters. Verify using the email link, then return here to sign in. Already have an ND account? No second signup is needed.</p>
         <p class="setup-note">Passwords are not stored. Access/refresh tokens stay in trusted extension-session storage, not in content scripts or persistent local storage. Browser restart or extension reload requires sign-in again; the queue remains on disk.</p>
         <button class="btn btn--ghost" id="signOut" type="button">Sign out and pause uploads</button>
       </section>
       <section class="setup-card">
-        <header class="setup-card__head"><span class="setup-step">2</span><h2>Select the intended workspace</h2></header>
-        <p>Workspaces are loaded from your authenticated staff memberships. Choosing one never starts collection or uploads historical records. Changing account/workspace does not retarget old queued data.</p>
+        <header class="setup-card__head"><span class="setup-step">2</span><h2>Account connection</h2></header>
+        <p>Your business is connected automatically when your account has one authorized business. No workspace form is needed.</p>
+        <button class="btn btn--ghost" id="createAccount" type="button" hidden>Set up my private business account</button>
+        <p class="setup-note">If you belong to an existing team, ask its owner for access instead of creating another business. First-time private setup creates an empty account, never imports reviews.</p>
+        <details id="advancedAccount"><summary>Advanced: existing business accounts</summary>
         <button class="btn btn--ghost" id="loadWorkspaces" type="button">Load authorized workspaces</button>
         <label class="setup-label" for="workspace">Workspace</label><select class="input" id="workspace"><option value="">Sign in to load choices</option></select>
         <button class="btn btn--ghost" id="selectWorkspace" type="button">Select workspace and keep paused</button>
+        </details>
         <button class="btn btn--ghost" id="testConnection" type="button">Test backend reads (no upload)</button>
         <p class="setup-note" id="connectionResult" role="status" aria-live="polite">Not tested. This checks staff access and empty table reads only, not upload acceptance.</p>
       </section>
@@ -38,6 +43,9 @@
         <button class="btn btn--ghost" id="retryUploads" type="button">Retry repairable blocked intents</button>
         <button class="btn btn--ghost" id="drainUploads" type="button">Process one released batch</button>
         <ul class="setup-instructions" id="blockedItems" aria-label="First twenty blocked local intents"></ul>
+        <h3>Recent local acknowledgments</h3>
+        <p class="setup-note">Up to 20 receipts for the saved business target. Match record and revision IDs in ND dashboard → Settings → Fudge intake receipts. These are saved acknowledgments, not a fresh backend check or proof of complete delivery.</p>
+        <ul class="setup-instructions" id="recentReceipts" aria-label="Recent local receipt metadata"></ul>
       </section>
       <section class="setup-card">
         <header class="setup-card__head"><span class="setup-step">4</span><h2>Separate historical and cleanup actions</h2></header>

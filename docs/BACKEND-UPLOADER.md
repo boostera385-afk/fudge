@@ -1,6 +1,6 @@
 # Optional ND backend intake — development implementation
 
-Updated: 2026-10-28. Code is implemented with local/mock tests. **Upload release
+Updated: 2026-10-29. Code is implemented with local/mock tests. **Upload release
 is OFF.** The shared intake schema is deployed as `20261028203642`; no real source
 upload or live pilot was performed. See `../supabase/README.md` for the boundary.
 
@@ -29,13 +29,18 @@ are preserved. The matching server design is the dashboard repository's
    do not remove/reinstall it.
 2. Open side panel -> **ND backend intake -> Setup**. Opening it reads local
    status only; it does not sign in, start collection or migrate data.
-3. For an explicitly authorized Auth test, get the shared project's **publishable**
-   key from the administrator. Use an existing verified dashboard staff account.
-   Sign-in requests only the pinned project's optional host permission. Never
-   paste a service-role/secret/management token or send your password to chat.
-4. Choose the exact workspace from authenticated staff memberships. Selection is
-   always paused. No historical library baseline is silently uploaded. Changing
-   account/workspace never retargets old intents; returning restores that target.
+3. Sign in with your existing ND email/password, or choose **Create account and
+   send verification email**, follow the email link, then sign in. Both apps use
+   the same Supabase Auth project. They have separate sessions, not automatic SSO.
+   Fudge bundles only the public project identity from the dashboard configuration;
+   users do not enter API keys. Permission is requested only for the pinned project.
+4. A single authorized business is selected automatically, paused. Multiple
+   authorized businesses remain under **Advanced**; none is chosen arbitrarily.
+   A verified user with no authorized business can explicitly **Set up my private
+   business account**, creating an empty `My business` through the existing guarded
+   RPC. Existing team members should ask their owner for access instead. No automatic
+   shared-team membership or role elevation is performed. No history is uploaded;
+   old queue targets remain separate. Signup alone creates no extension session.
 5. Upload enablement, historical queueing and manual upload stay release-gated.
    There is no message/checkbox override for the false release constant. Auth
    review is not an intake pilot. Use the dashboard for account recovery; no
@@ -94,6 +99,13 @@ eight attempts. Expired Auth waits for sign-in; schema/permission/invalid/receip
 failures block instead of looping. Status exposes counts and at most twenty
 blocked local IDs/reasons, not source rows or tokens.
 
+Setup also shows up to twenty newest saved acknowledgment receipts for the selected
+target: record/revision IDs, revision number and local acknowledgment time. Compare
+these IDs in ND Settings -> Fudge intake receipts. The v1 receipt has no checksum;
+the backend view shows its own stored checksum separately. Saved acknowledgments
+do not prove current backend availability or complete delivery. No original source
+or private token is included in the receipt list; other targets remain isolated.
+
 ## Pause, cancellation and deletion
 
 Controls serialize against one bounded in-flight request. Pause/cancel/sign-out
@@ -141,3 +153,14 @@ Before changing `UPLOAD_RELEASED` in `backend-worker.js`:
 5. Separately approve a small authorized intake pilot and reviewed release change.
    Historical upload stays off unless separately requested. Intake never approves
    publication or enables profile automation/Sheet writeback. P2 is not complete.
+
+## Maintainer configuration
+
+`node scripts/configure-backend.cjs "<ND dashboard apps/web/.env.local path>"`
+generates `backend-public-config.js` with only the pinned URL and modern publishable
+key. It refuses another project or a privileged/legacy key, and never bundles the
+environment file or server-side settings. The generated public identity must ship
+with the extension; key rotation requires regeneration and extension reload.
+The Supabase Site URL, email template and allowed redirects must point to a working
+dashboard confirmation flow. Actual verification email delivery/link acceptance is
+still pending. Password recovery/resend remains available through the dashboard.

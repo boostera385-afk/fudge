@@ -4,6 +4,8 @@ let busy = false;
 function message(text) { field("backendStatus").textContent = text; }
 function clearConnectionCheck() { field("connectionResult").textContent = "Not tested for the current selection. Test backend reads explicitly; this never releases uploads."; }
 function choices(list) {
+  field("createAccount").hidden = !Array.isArray(list) || list.length !== 0;
+  field("advancedAccount").open = Array.isArray(list) && list.length > 1;
   field("workspace").replaceChildren();
   for (const item of list || []) {
     const option = document.createElement("option"); option.value = item.id; option.textContent = `${item.name} — ${item.id}`; field("workspace").append(option);
@@ -17,14 +19,23 @@ async function send(type, values = {}) {
 async function refresh() {
   const state = await send("BACKEND_STATUS");
   const counts = state.counts;
-  message(`${state.signedIn ? "Signed in" : "Signed out"} · ${state.enabled ? "enabled" : "paused"} · workspace ${state.organizationId || "not selected"} · pending ${counts.pending} · blocked ${counts.blocked} · acknowledged ${counts.acknowledged} · cancelled ${counts.cancelled} · other targets ${counts.otherTargets}. ${state.reason}`);
+  message(`${state.signedIn ? "Signed in" : "Signed out"} · ${state.enabled ? "enabled" : "paused"} · ${state.signedIn && state.organizationId ? "business connection saved" : "sign in to connect your business"} · pending ${counts.pending} · blocked ${counts.blocked} · acknowledged ${counts.acknowledged} · cancelled ${counts.cancelled} · other targets ${counts.otherTargets}. ${state.reason}`);
   field("enableUploads").disabled = !state.releaseUploads;
   field("queueHistory").disabled = !state.releaseUploads;
   field("drainUploads").disabled = !state.releaseUploads;
-  if (!field("publishableKey").value && state.publishableKey) field("publishableKey").value = state.publishableKey;
+  if (!state.signedIn) field("createAccount").hidden = true;
   field("blockedItems").replaceChildren();
   for (const entry of state.blockedItems || []) {
     const item = document.createElement("li"); item.textContent = `${entry.localId || "Unidentified local source"}: ${entry.reason}`; field("blockedItems").append(item);
+  }
+  field("recentReceipts").replaceChildren();
+  for (const receipt of state.recentReceipts || []) {
+    const item = document.createElement("li");
+    item.textContent = `Record ${receipt.recordId} · revision ${receipt.revision} · revision ID ${receipt.revisionId} · acknowledged locally ${new Date(receipt.acknowledgedAt).toISOString()}`;
+    field("recentReceipts").append(item);
+  }
+  if (!state.recentReceipts?.length) {
+    const item = document.createElement("li"); item.textContent = "No saved acknowledgments for this target. This does not mean your local reviews are missing."; field("recentReceipts").append(item);
   }
   field("releaseStatus").textContent = state.releaseUploads ? "Release enabled for reviewed backend deployment. Uploads still require explicit consent and workspace selection." : "The shared schema is deployed; uploads remain gated pending browser acceptance, policy review and pilot approval. This build never sends intake RPCs, including after sign-in or read checks.";
 }
@@ -34,9 +45,9 @@ async function act(work) {
   try { await work(); await refresh(); } catch (error) { message(error.message || "Setup failed. Private details are not displayed."); }
   finally { busy = false; }
 }
-field("signInForm").addEventListener("submit", (event) => {
-  event.preventDefault();
+function authenticate(type) {
   if (busy) return;
+  if (!field("signInForm").reportValidity()) return;
   // Must be initiated directly from the user's gesture, before another async call.
   const permission = chrome.permissions.request({ origins: ["https://xtefjnfdjnxwrpkoydaj.supabase.co/*"] });
   const password = field("password").value;
@@ -44,10 +55,17 @@ field("signInForm").addEventListener("submit", (event) => {
   act(async () => {
     clearConnectionCheck();
     if (!(await permission)) throw new Error("Project network permission was not granted. Nothing was connected.");
-    const result = await send("BACKEND_SIGN_IN", { publishableKey: field("publishableKey").value.trim(), email: field("email").value.trim(), password });
-    choices(result.workspaces);
+    const result = await send(type, { email: field("email").value.trim(), password });
+    if (type === "BACKEND_SIGN_UP") field("authResult").textContent = result.message;
+    else { choices(result.workspaces); field("authResult").textContent = "Signed in with your shared Fudge / ND account. Uploads remain paused."; }
   });
-});
+}
+field("signInForm").addEventListener("submit", (event) => { event.preventDefault(); authenticate("BACKEND_SIGN_IN"); });
+field("signUp").addEventListener("click", () => authenticate("BACKEND_SIGN_UP"));
+field("createAccount").addEventListener("click", () => act(async () => {
+  if (!confirm("Create an empty private business account? If you belong to a team, cancel and ask its owner for access instead.")) return;
+  clearConnectionCheck(); choices((await send("BACKEND_CREATE_ACCOUNT")).workspaces);
+}));
 field("loadWorkspaces").addEventListener("click", () => act(async () => choices((await send("BACKEND_WORKSPACES")).workspaces)));
 field("selectWorkspace").addEventListener("click", () => act(async () => { clearConnectionCheck(); await send("BACKEND_SELECT_WORKSPACE", { organizationId: field("workspace").value }); }));
 field("signOut").addEventListener("click", () => act(async () => { clearConnectionCheck(); await send("BACKEND_SIGN_OUT"); choices([]); }));

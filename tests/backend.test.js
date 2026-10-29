@@ -118,6 +118,123 @@ test("privileged/management keys fail before any network request", async () => {
   for (const publishableKey of ["sb_secret_fixture", "sbp_fixture", "eyJ.fixture.jwt", ""]) await assert.rejects(f.service.signIn({ publishableKey, email: "fixture@example.test", password: "fixture" }));
   assert.equal(f.calls.length, 0);
 });
+function accountHandler({ organizations = [org], verified = true, signupStatus = 200, onCreate = () => {} } = {}) {
+  return async (url) => {
+    if (url.endsWith("/auth/v1/signup")) return json({ access_token: "must-not-store-signup-token", refresh_token: "must-not-store-refresh" }, signupStatus);
+    if (url.includes("/auth/v1/token?")) return json({ access_token: "fixture-access-private", refresh_token: "fixture-refresh-private", expires_in: 3600 });
+    if (url.endsWith("/auth/v1/user")) return json({ id: user, email_confirmed_at: verified ? "2026-10-27T00:00:00Z" : null });
+    if (url.includes("/reporting_memberships?")) return json(organizations.map((id) => ({ organization_id: id, role: "owner" })));
+    if (url.includes("/reporting_organizations?")) return json(organizations.map((id) => ({ id, name: "Fixture business" })));
+    if (url.endsWith("/rpc/reporting_create_workspace")) { onCreate(); organizations.push(org); return json(org); }
+    throw new Error("Unexpected account endpoint");
+  };
+}
+test("single-business sign-in auto-selects the authorized target without enabling or migrating", async () => {
+  const f = setup({ released: false, signedIn: false, initialConfig: null });
+  f.handle(accountHandler());
+  await f.service.signIn({ publishableKey: key, email: "fixture@example.test", password: "fixture-password" });
+  assert.equal(f.local.data.fudgeBackendConfig.organizationId, org);
+  assert.equal(f.local.data.fudgeBackendConfig.enabled, false);
+  assert.equal((await f.service.status()).counts.pending, 0);
+  assert.ok(!f.calls.some((c) => c.url.includes("/rpc/")));
+});
+test("multiple-business sign-in never silently chooses or creates another target", async () => {
+  const f = setup({ signedIn: false, initialConfig: null });
+  const result = await f.service.signIn({ publishableKey: key, email: "fixture@example.test", password: "fixture-password" });
+  assert.equal(result.workspaces.length, 2);
+  assert.equal(f.local.data.fudgeBackendConfig, null);
+  assert.ok(!f.calls.some((c) => c.url.includes("/rpc/")));
+});
+test("unverified email cannot establish a Fudge session or create a business", async () => {
+  const f = setup({ signedIn: false }); f.handle(accountHandler({ verified: false }));
+  await assert.rejects(f.service.signIn({ publishableKey: key, email: "fixture@example.test", password: "fixture-password" }), /verified/);
+  assert.equal(f.session.data.fudgeBackendSession, undefined);
+  assert.equal(f.local.data.fudgeBackendConfig.enabled, false);
+  assert.ok(!f.calls.some((c) => c.url.includes("/rpc/")));
+});
+test("signup requests verification without accepting returned tokens, provisioning or modifying the queue", async () => {
+  const f = setup({ signedIn: false, released: false }); f.handle(accountHandler());
+  const before = structuredClone(f.local.data);
+  const result = await f.service.signUp({ publishableKey: key, email: "fixture@example.test", password: "fixture-password" });
+  assert.match(result.message, /check your email and verify/);
+  assert.equal(f.calls.length, 1);
+  assert.equal(f.calls[0].url, C.ORIGIN + "/auth/v1/signup");
+  assert.equal(f.session.data.fudgeBackendSession, undefined);
+  assert.deepEqual(f.local.data, before);
+  assert.ok(!JSON.stringify(result).includes("must-not-store"));
+});
+test("signup rejects weak passwords and privileged app keys before sending any request", async () => {
+  const f = setup();
+  for (const password of ["short", "x".repeat(129)]) await assert.rejects(f.service.signUp({ publishableKey: key, email: "fixture@example.test", password }));
+  await assert.rejects(f.service.signUp({ publishableKey: "sb_secret_fixture", email: "fixture@example.test", password: "fixture-password" }));
+  assert.equal(f.calls.length, 0);
+});
+test("signup rate-limit errors do not leak responses or accept sessions", async () => {
+  const f = setup({ signedIn: false }); f.handle(accountHandler({ signupStatus: 429 }));
+  await assert.rejects(f.service.signUp({ publishableKey: key, email: "fixture@example.test", password: "fixture-password" }), (e) => e.code === "transient" && !e.message.includes("must-not-store"));
+  assert.equal(f.session.data.fudgeBackendSession, undefined);
+});
+test("first login waits for explicit private-account setup and reuses it on repeated clicks", async () => {
+  const f = setup({ signedIn: false, initialConfig: null, released: false }); let created = 0;
+  f.handle(accountHandler({ organizations: [], onCreate: () => created++ }));
+  const result = await f.service.signIn({ publishableKey: key, email: "fixture@example.test", password: "fixture-password" });
+  assert.equal(result.workspaces.length, 0); assert.equal(created, 0);
+  await Promise.all([f.service.createAccount(), f.service.createAccount()]);
+  assert.equal(created, 1);
+  assert.equal(f.local.data.fudgeBackendConfig.organizationId, org);
+  assert.equal(f.local.data.fudgeBackendConfig.enabled, false);
+  assert.equal((await f.service.status()).counts.pending, 0);
+  const provision = f.calls.find((c) => c.url.endsWith("/rpc/reporting_create_workspace"));
+  assert.deepEqual(JSON.parse(provision.options.body), { workspace_name: "My business" });
+});
+test("private-account setup requires verified sign-in and never creates for a multi-business user", async () => {
+  const signedOut = setup({ signedIn: false });
+  await assert.rejects(signedOut.service.createAccount(), /Sign in again/);
+  assert.equal(signedOut.calls.length, 0);
+  const f = setup(); f.handle(accountHandler({ organizations: [org, otherOrg] }));
+  await assert.rejects(f.service.createAccount(), /needs review/);
+  assert.ok(!f.calls.some((c) => c.url.includes("/rpc/")));
+});
+test("bundled backend config contains only pinned public application identity", () => {
+  const context = {}; vm.createContext(context);
+  vm.runInContext(fs.readFileSync(path.join(root, "backend-public-config.js"), "utf8"), context);
+  const config = context.FudgeBackendPublicConfig;
+  assert.deepEqual(Object.keys(config).sort(), ["publishableKey", "url"]);
+  assert.equal(config.url, C.ORIGIN);
+  assert.match(config.publishableKey, /^sb_publishable_[A-Za-z0-9_-]{16,200}$/);
+  assert.ok(Object.isFrozen(config));
+  const worker = fs.readFileSync(path.join(root, "backend-worker.js"), "utf8");
+  assert.ok(!worker.includes("publishableKey: m.publishableKey"));
+  const html = fs.readFileSync(path.join(root, "backend-setup.html"), "utf8");
+  assert.ok(!html.includes('id="publishableKey"'));
+});
+test("local acknowledgment list exposes only receipt IDs, revision and local time for the saved target", async () => {
+  const f = setup(); await f.enqueue(); await f.service.drain();
+  const state = await f.service.status();
+  assert.equal(state.recentReceipts.length, 1);
+  const receipt = state.recentReceipts[0];
+  assert.deepEqual(Object.keys(receipt).sort(), ["acknowledgedAt", "recordId", "revision", "revisionId"]);
+  assert.ok(C.uuid(receipt.recordId)); assert.ok(C.uuid(receipt.revisionId));
+  assert.equal(receipt.revision, 1); assert.equal(receipt.acknowledgedAt, clock);
+  assert.ok(!JSON.stringify(receipt).includes(original.text));
+  await f.service.selectWorkspace(otherOrg);
+  assert.equal((await f.service.status()).recentReceipts.length, 0);
+});
+test("local receipt history is newest-first, bounded to twenty and excludes malformed or foreign receipts", async () => {
+  const f = setup({ released: false });
+  for (let i = 0; i < 25; i++) {
+    f.local.data[C.INTENT_PREFIX + i] = { ...config, status: "acknowledged", acknowledgedAt: clock + i,
+      receipt: { record_id: randomUUID(), revision_id: randomUUID(), revision: 1 } };
+  }
+  f.local.data[C.INTENT_PREFIX + "foreign"] = { ...config, organizationId: otherOrg, status: "acknowledged", acknowledgedAt: clock + 100, receipt: { record_id: randomUUID(), revision_id: randomUUID(), revision: 1 } };
+  f.local.data[C.INTENT_PREFIX + "bad"] = { ...config, status: "acknowledged", acknowledgedAt: clock + 1000, receipt: { record_id: "bad", revision_id: randomUUID(), revision: 1 } };
+  f.local.data[C.INTENT_PREFIX + "badtime"] = { ...config, status: "acknowledged", acknowledgedAt: 1e20, receipt: { record_id: randomUUID(), revision_id: randomUUID(), revision: 1 } };
+  const state = await f.service.status();
+  assert.equal(state.recentReceipts.length, 20);
+  assert.equal(state.recentReceipts[0].acknowledgedAt, clock + 24);
+  assert.equal(state.recentReceipts[19].acknowledgedAt, clock + 5);
+  assert.equal(f.calls.length, 0);
+});
 test("workspace selection is membership-checked, paused and never queues historical records", async () => {
   const f = setup(); await f.service.selectWorkspace(org);
   assert.equal(f.local.data.fudgeBackendConfig.enabled, false);

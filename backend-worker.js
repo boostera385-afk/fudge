@@ -22,7 +22,9 @@
   });
   const commands = {
     BACKEND_STATUS: () => service.status(),
-    BACKEND_SIGN_IN: (m) => service.signIn({ publishableKey: m.publishableKey, email: m.email, password: m.password }),
+    BACKEND_SIGN_IN: (m) => service.signIn({ publishableKey: globalThis.FudgeBackendPublicConfig?.publishableKey, email: m.email, password: m.password }),
+    BACKEND_SIGN_UP: (m) => service.signUp({ publishableKey: globalThis.FudgeBackendPublicConfig?.publishableKey, email: m.email, password: m.password }),
+    BACKEND_CREATE_ACCOUNT: () => service.createAccount(),
     BACKEND_WORKSPACES: () => service.workspaces(),
     BACKEND_SELECT_WORKSPACE: (m) => service.selectWorkspace(m.organizationId),
     BACKEND_TEST_CONNECTION: () => service.testConnection(),

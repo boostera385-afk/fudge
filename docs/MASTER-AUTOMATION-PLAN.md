@@ -110,6 +110,8 @@ The first raw payload must remain immutable. A fuller recapture creates a linked
 
 P2 checkpoint (2026-10-28): workspace/revision intake source `supabase/migrations/20261028203213_fudge_ingestion_v1.sql` is applied through MCP as hosted `20261028203642` after explicit approval. Local tests and hosted rollback-only receipt/revision/RLS/denial smoke checks passed; see dashboard `docs/DB-DEPLOYMENT-20261028.md`. Fudge implements optional verified-account/workspace setup, trusted session-only Auth tokens, immutable capture intents, bounded retries, strict receipts and cancellation epochs; see Fudge `docs/BACKEND-UPLOADER.md`. Upload release remains false. Real-browser/REST/concurrency acceptance, backup/restore, retention/deletion and an approved pilot remain pending; no real source or historical library was uploaded. Publishing protocol is not deployed. P2 is incomplete; do not apply older per-user SQL unchanged.
 
+Email setup checkpoint (2026-10-29): Fudge and dashboard share one configured Supabase Auth project. Fudge signup/login uses bundled public identity; one authorized business auto-selects paused, multiple businesses remain advanced, and first-time private account setup is explicit. Dashboard account setup no longer requires a workspace-name form. Internal tenant isolation remains; shared credentials are not shared sessions. Live email/browser acceptance is pending and upload release stays false.
+
 1. Add opt-in backend setup with authorized Supabase sign-in, workspace selection and connection test. Never package service-role/secret keys.
 2. Persist review plus upload intent before scheduling network work; upload status must not modify existing Sheets acknowledgment state.
 3. Use bounded batches and request timeouts. Existing raw RPC accepts 1–100 records and its database 1 MiB limit; client request-byte limits must be explicit and leave serialization overhead. Oversized individual records need a visible repair path.
@@ -119,6 +121,8 @@ P2 checkpoint (2026-10-28): workspace/revision intake source `supabase/migration
 7. Historical local-library upload is separately opt-in. Show pending, uploaded, retrying, blocked and last success; backend disconnect must not erase local reviews or silently reassign queued data to another workspace.
 
 ### B. Cleanup, review and approved content
+
+P3 visibility checkpoint (2026-10-29): dashboard `/dashboard/fudge` adds staff/verified-email-gated backend counts and bounded revision metadata; Fudge setup exposes bounded saved acknowledgment IDs for comparison. Failed reads are not zero, local backlog is not visible from the dashboard, and separate queries are not an atomic reconciliation snapshot. Live UI acceptance, automated reconciliation, backend keyword management, review/approval and durable Sheet writeback remain incomplete. No upload release or browser execution enabled.
 
 Apply versioned deterministic rules first; AI assistance is optional, metered and never changes the raw source. Validate text, service classification, links and media rights; suspicious duplicate matches need review. Normalization that does not alter meaning can be automatic. Material rewrite remains a draft.
 
