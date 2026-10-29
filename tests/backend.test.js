@@ -102,6 +102,56 @@ test("release gate blocks enable/history/drain even if local configuration is ta
   await f.service.drain(); assert.equal(f.calls.length, 0);
   assert.equal((await f.service.status()).counts.pending, 1);
 });
+test("inactive drains without retired epochs avoid redundant queue scans", async () => {
+  const f = setup({ released: false }); await f.enqueue();
+  let scans = 0;
+  const getKeys = f.local.area.getKeys;
+  f.local.area.getKeys = async () => { scans++; return getKeys(); };
+  const result = await f.service.drain();
+  assert.equal(scans, 1); assert.equal(result.counts.pending, 1);
+  assert.equal(f.calls.length, 0);
+});
+test("active drain reuses a queue snapshot and returns fresh acknowledgment status", async () => {
+  const f = setup(); await f.enqueue();
+  let scans = 0;
+  const getKeys = f.local.area.getKeys;
+  f.local.area.getKeys = async () => { scans++; return getKeys(); };
+  const result = await f.service.drain();
+  assert.equal(scans, 2); // selection snapshot plus fresh returned status
+  assert.equal(result.counts.acknowledged, 1);
+});
+test("overlapping alarm/manual drains cannot duplicate an in-flight batch", async () => {
+  const f = setup(); await f.enqueue();
+  let release, signalStarted;
+  const hold = new Promise((resolve) => { release = resolve; });
+  const started = new Promise((resolve) => { signalStarted = resolve; });
+  f.handle(async (url, options) => {
+    assert.ok(url.endsWith("/rpc/reporting_ingest_fudge_reviews_v1"));
+    signalStarted(); await hold;
+    return json(JSON.parse(options.body).reviews.map((review) => ({ source: review.source, source_review_id: review.source_review_id,
+      record_id: randomUUID(), revision_id: randomUUID(), revision: 1, inserted_record: true, inserted_revision: true })));
+  });
+  const first = f.service.drain();
+  try {
+    await started;
+    assert.deepEqual(await f.service.drain(), { ok: true, busy: true });
+    assert.equal(f.calls.length, 1);
+  } finally { release(); }
+  assert.equal((await first).counts.acknowledged, 1);
+  assert.equal(f.calls.length, 1);
+});
+test("a thousand queued fixtures remain durable while one drain sends only its bounded batch", async () => {
+  const f = setup();
+  const reviews = Array.from({ length: 1000 }, (_, index) => ({ ...original, id: `google:load-${index}`, googleReviewId: `load-${index}` }));
+  await f.local.area.set(C.captureWrites(config, reviews, { now: clock }));
+  const result = await f.service.drain();
+  assert.equal(result.counts.acknowledged, 25);
+  assert.equal(result.counts.pending, 975);
+  assert.equal(Object.keys(f.local.data).filter((key) => key.startsWith(C.INTENT_PREFIX)).length, 1000);
+  assert.equal(result.recentReceipts.length, 20);
+  assert.equal(f.calls.length, 1);
+  assert.equal(JSON.parse(f.calls[0].options.body).reviews.length, 25);
+});
 test("sign-in verifies user/workspace and never persists password or tokens to local storage", async () => {
   const f = setup({ signedIn: false });
   const result = await f.service.signIn({ publishableKey: key, email: "fixture@example.test", password: "fixture-password-private" });

@@ -226,15 +226,22 @@
       // A collector may finish a local write after Cancel using an older target
       // snapshot. Sweep those retired epochs even while paused/release-gated.
       const { fudgeBackendCancelEpochs = {} } = await local.get({ fudgeBackendCancelEpochs: {} });
+      const config = await configValue();
+      const active = releaseUploads && C.validTarget(config) && config.enabled;
+      // Inactive alarms need only the status scan when there are no retired epochs.
+      // Never skip cancellation cleanup merely because uploads are paused/off.
+      if (!active && !Object.keys(fudgeBackendCancelEpochs).length) return status();
+      const snapshot = await entries();
       const retired = {};
-      for (const [key, entry] of await entries()) if (["pending", "blocked"].includes(entry.status) && C.uuid(fudgeBackendCancelEpochs[entry.targetId]) && C.cancellationEpoch(entry) !== fudgeBackendCancelEpochs[entry.targetId]) {
+      for (const [key, entry] of snapshot) if (["pending", "blocked"].includes(entry.status) && C.uuid(fudgeBackendCancelEpochs[entry.targetId]) && C.cancellationEpoch(entry) !== fudgeBackendCancelEpochs[entry.targetId]) {
         retired[key] = { ...entry, status: "cancelled", review: null, reason: "Capture predates target cancellation; it cannot resume or upload." };
       }
       if (Object.keys(retired).length) await local.set(retired);
-      const config = await configValue();
-      if (!releaseUploads || !C.validTarget(config) || !config.enabled) return status();
+      if (!active) return status();
       const chosen = [], seen = new Set(), invalid = {};
-      const candidates = (await entries()).sort((a, b) => a[1].createdAt - b[1].createdAt || a[0].localeCompare(b[0]));
+      // New captures after this snapshot stay pending for the next bounded drain.
+      // Reuse the snapshot rather than re-cloning the entire queue a second time.
+      const candidates = snapshot.map(([key, entry]) => [key, retired[key] || entry]).sort((a, b) => a[1].createdAt - b[1].createdAt || a[0].localeCompare(b[0]));
       for (const [key, entry] of candidates) {
         if (entry.targetId !== config.targetId || entry.userId !== config.userId || entry.organizationId !== config.organizationId || entry.status !== "pending" || entry.nextAttemptAt > now()) continue;
         if (!C.validReview(entry.review, now())) { invalid[key] = { ...entry, status: "blocked", reason: "Queued source needs identity, timestamp or payload repair." }; continue; }

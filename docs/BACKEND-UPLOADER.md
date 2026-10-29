@@ -94,6 +94,14 @@ receipt metadata and clear the copied payload; local library originals remain.
 Lost responses/failed local ack can replay source content safely only because the
 matching backend must deduplicate transactionally.
 
+Queue reads are coalesced within a drain: selection reuses its sweep snapshot;
+new captures wait for a later batch and returned status is read fresh. Inactive
+drains without retired epochs skip the redundant sweep; cancellation cleanup is
+not skipped merely because intake is paused. Overlapping drains return busy rather
+than submit another batch. The 1,000-intent fixture checks bounded submission/data
+retention only; memory/latency under actual browser storage and production volume
+still need measurement. No disk-cap dropping or receipt cleanup policy is implied.
+
 Transient failures use bounded jitter/backoff and Retry-After, blocking after
 eight attempts. Expired Auth waits for sign-in; schema/permission/invalid/receipt
 failures block instead of looping. Status exposes counts and at most twenty

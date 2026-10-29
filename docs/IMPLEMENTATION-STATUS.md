@@ -1,5 +1,19 @@
 # Fudge backend implementation status
 
+## Queue read-efficiency hardening — 2026-10-29
+
+Inactive drains with no retired cancellation epochs now perform only the status
+scan, not a redundant sweep. Active drains reuse the selection/sweep snapshot rather
+than reading/cloning the queue again. Fresh returned status still reads current
+storage. Captures after the selection snapshot remain for later batches; retired
+epochs are still swept while paused/release-off. Existing drain coalescing is
+unchanged and now explicitly tested against overlapping alarm/manual calls.
+Validation: 55 backend tests PASS, including 1,000 queued fixtures with exactly 25
+acknowledged/975 pending and all 1,000 intents retained; 127 smoke tests PASS;
+service syntax and diff checks PASS. This is a fixture workload, not a real-browser
+performance benchmark, crash-safety proof or guarantee of no busy states. No
+collection/Sheet behavior, upload release, retention or backend storage changed.
+
 ## P3 service-configuration preview handoff — 2026-10-29
 
 The dashboard repository adds local-only catalog validation under

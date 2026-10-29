@@ -177,6 +177,8 @@ Optimize profile visits only after baseline correctness: acquire exclusive profi
 
 ## 7. State, queue and recovery rules
 
+Hardening checkpoint (2026-10-29): intake status reads have a 15-second application deadline and abort signals; failures remain unavailable, never zero. Catalog preview rendering is paginated at 25 items per section. Fudge reuses a drain snapshot and skips redundant inactive sweeps while preserving cancellation and fresh status; fixture tests cover overlapping drains and 1,000 pending intents. These changes do not establish live-load capacity, crash-proof operation, retention, rule activation or upload release.
+
 - Content: `collected -> validated / needs_review -> approved / rejected`; an edit creates a new revision.
 - Execution: `queued -> leased -> submitted / failed / needs_reconciliation`. Submission is not visibility verification.
 - Observation: independent outcome history plus last sourced summary; technical failures never overwrite a previously observed visibility as removed.
