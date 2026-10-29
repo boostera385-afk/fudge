@@ -1,5 +1,26 @@
 # Fudge backend implementation status
 
+## Sheet writeback protocol handoff — 2026-10-29
+
+After explicit authorization, the dashboard deployed a durable Sheet writeback
+outbox protocol to the shared database: source `20261029175611` applied as
+hosted `20261029180253`, with follow-up FK-index source `20261029180506` as
+hosted `20261029180528` clearing the one new advisor finding. The protocol
+records bounded append/update_cells intents per business with per-organization
+ordering, replay-safe request/stable keys, leased bounded claim batches,
+lease-stamped idempotent acknowledgments, retry exhaustion at five attempts,
+lease-expiry reclaim and pending-only cancel. Hosted rollback-only smoke
+passed; no fixture rows remain and all writeback/catalog counts are zero.
+Nothing dispatches to any real Sheet yet: no connector, worker or Edge
+Function writes through these tables, Fudge's own writeback remains the only
+Sheet writer and both Fudge release gates remain false. Its current full
+dashboard validation: 623 tests / 41 files, typecheck, lint and build PASS.
+No Fudge source changed in this handoff; prior 67 backend/127 smoke results
+are historical. See dashboard `DB-DEPLOYMENT-20261029-WRITEBACK.md` for full
+evidence. The future shared deliverer and the separately approved
+rule-application path remain gated on live acceptance and the ownership
+decision.
+
 ## Shared catalog deployment handoff — 2026-10-29
 
 After explicit authorization, the dashboard applied catalog source
