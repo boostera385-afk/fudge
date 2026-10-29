@@ -1,5 +1,21 @@
 # Fudge backend implementation status
 
+## Live-testing readiness checkpoint — 2026-10-29
+
+The dashboard repository added the explicit Sheet writeback queue UI
+(`/dashboard/settings/sheet-writeback`): staff + verified-email only, bounded
+newest-25/total status view, confirmed enqueue with stable replay IDs and a
+15-second abort, and pending-only cancellation, all stating plainly that
+delivery is inactive — no Sheet cell is touched. Its current full dashboard
+validation: 646 tests / 43 files, typecheck, lint and build PASS. No Fudge
+source changed in this handoff; both Fudge release gates remain false. The
+identical readiness checkpoint ("shield check") is now saved in both
+repositories as `docs/LIVE-TESTING-READINESS-CHECKPOINT-20261029.md` and must
+stay byte-identical until a dated post-testing record replaces it. Live testing
+follows the checkpoint's ordered checklist: auth, catalog accept, Sheet
+connection (development copy only), writeback queue (no Sheet change), worker
+pairing and reporting/timezone correctness.
+
 ## Sheet writeback protocol handoff — 2026-10-29
 
 After explicit authorization, the dashboard deployed a durable Sheet writeback
