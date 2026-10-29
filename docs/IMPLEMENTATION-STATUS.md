@@ -1,5 +1,16 @@
 # Fudge backend implementation status
 
+## P3 service-configuration preview handoff — 2026-10-29
+
+The dashboard repository adds local-only catalog validation under
+`/dashboard/settings/services`, using the user's private snapshot's Services rules
+as input. No service configuration is downloaded to Fudge, no current Services
+sync is replaced, and no backend storage/activation exists yet. Fudge source is
+unchanged in this slice; prior 51/127 test results are historical, not rerun evidence.
+Both master-plan copies record remaining versioned storage, access, activation,
+cache/recovery and single-writer cutover gates. Private workbook/catalog copies
+remain excluded from Git and are not migration fixtures.
+
 ## P3 receipt visibility handoff — 2026-10-29
 
 Setup now displays at most 20 newest saved acknowledgment receipts for the current
