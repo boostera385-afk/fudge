@@ -1,5 +1,32 @@
 # Fudge backend implementation status
 
+## Code-first monitoring handoff — 2026-10-29
+
+Dashboard source now contains explicit customer/date/post-vs-listing cohort
+requests, stable replay receipts, frozen membership, bounded job planning,
+strict history/detail/progress views and setup-fail-closed controls. Its
+`supabase/drafts/check_cohort_v1.sql` is **local and undeployed**; no applied
+migration or worker claim/complete function changed. Explicit 60–1440 minute
+freshness is separate from the unchanged scheduled 24-hour policy. Missing or
+unknown source information is never replaced with invented cohort members.
+Mapped result-to-Sheet outbox delivery and latest-100-per-profile remain code
+gaps; this does not claim the entire daily workflow is complete.
+
+Worker offline preflight and exact candidate dependency pins are implemented;
+43 worker unit tests PASS. Actual preflight exits 1 for this unconfigured
+environment, with live readiness false and zero network/profile/job actions.
+No dependencies/configuration were installed or populated. Dashboard full
+validation: typecheck/lint PASS, **782 tests / 55 files PASS**, build PASS.
+Signed-out local cohort route smoke passed and its owned test server was stopped.
+Thirty local cohort DB cases include the 100-publication fixture and DST;
+single-runtime PGlite is not live PostgreSQL concurrency or browser acceptance.
+
+Fudge source unchanged. Its 67 backend/127 smoke tests from the prior security
+handoff are historical, not rerun for this documentation-only handoff. Both
+release gates remain false; cache application, live intake acceptance and the
+existing Sheet/configuration ownership decisions stay separate. No Sheets,
+accounts, profiles, worker execution, production schema or release changed.
+
 ## Dashboard identity/workspace security handoff — 2026-10-29
 
 The dashboard now implements central fresh-user/email-confirmation checks before
