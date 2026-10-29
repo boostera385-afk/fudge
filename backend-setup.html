@@ -32,6 +32,8 @@
         </details>
         <button class="btn btn--ghost" id="testConnection" type="button">Test backend reads (no upload)</button>
         <p class="setup-note" id="connectionResult" role="status" aria-live="polite">Not tested. This checks staff access and empty table reads only, not upload acceptance.</p>
+        <button class="btn btn--ghost" id="refreshCatalog" type="button" disabled>Download published catalog preview (release off)</button>
+        <p class="setup-note" id="catalogResult" role="status" aria-live="polite">Backend catalog deployment/download is gated off. Cached preview never replaces current Sheet/local service rules.</p>
       </section>
       <section class="setup-card">
         <header class="setup-card__head"><span class="setup-step">3</span><h2>Intake release and queue</h2></header>

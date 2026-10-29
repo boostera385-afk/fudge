@@ -2,7 +2,10 @@
 const field = (id) => document.getElementById(id);
 let busy = false;
 function message(text) { field("backendStatus").textContent = text; }
-function clearConnectionCheck() { field("connectionResult").textContent = "Not tested for the current selection. Test backend reads explicitly; this never releases uploads."; }
+function clearConnectionCheck() {
+  field("connectionResult").textContent = "Not tested for the current selection. Test backend reads explicitly; this never releases uploads.";
+  field("catalogResult").textContent = "Catalog preview not checked for this account selection. No cached catalog is applied to collection or Sheets.";
+}
 function choices(list) {
   field("createAccount").hidden = !Array.isArray(list) || list.length !== 0;
   field("advancedAccount").open = Array.isArray(list) && list.length > 1;
@@ -23,6 +26,7 @@ async function refresh() {
   field("enableUploads").disabled = !state.releaseUploads;
   field("queueHistory").disabled = !state.releaseUploads;
   field("drainUploads").disabled = !state.releaseUploads;
+  field("refreshCatalog").disabled = !state.releaseCatalog;
   if (!state.signedIn) field("createAccount").hidden = true;
   field("blockedItems").replaceChildren();
   for (const entry of state.blockedItems || []) {
@@ -67,6 +71,10 @@ field("createAccount").addEventListener("click", () => act(async () => {
   clearConnectionCheck(); choices((await send("BACKEND_CREATE_ACCOUNT")).workspaces);
 }));
 field("loadWorkspaces").addEventListener("click", () => act(async () => choices((await send("BACKEND_WORKSPACES")).workspaces)));
+field("refreshCatalog").addEventListener("click", () => act(async () => {
+  const result = await send("BACKEND_REFRESH_CATALOG");
+  field("catalogResult").textContent = `Catalog preview: ${result.state}; usable cached preview ${result.available ? "yes" : "no"}; generation ${result.generation ?? "unknown"}, revision ${result.revision ?? "unknown"}, rules ${result.rules}. Not applied to collection or Sheets.`;
+}));
 field("selectWorkspace").addEventListener("click", () => act(async () => { clearConnectionCheck(); await send("BACKEND_SELECT_WORKSPACE", { organizationId: field("workspace").value }); }));
 field("signOut").addEventListener("click", () => act(async () => { clearConnectionCheck(); await send("BACKEND_SIGN_OUT"); choices([]); }));
 field("testConnection").addEventListener("click", () => act(async () => {

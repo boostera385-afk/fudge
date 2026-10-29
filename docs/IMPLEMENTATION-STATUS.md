@@ -1,5 +1,19 @@
 # Fudge backend implementation status
 
+## Versioned catalog cache development — 2026-10-29
+
+Added `backend-catalog.js` and a trusted internal read-preview command, independently
+gated by `CATALOG_DOWNLOAD_RELEASED = false`. Production uploads also remain false.
+Cache validates bounded exact snapshots, segregates account/business keys, detects
+same-generation conflicts/downgrades, permits higher-generation rollback, serializes
+refreshes and retains last-good data on transient download/storage failures. Service
+rechecks user and membership online; it does not use cache to bypass auth checks.
+Cache is never applied to existing Sheet/local service rules. Setup resets displayed
+preview metadata on identity/target changes; no automatic network refresh occurs.
+See `SERVICE-CATALOG-CACHE.md` for limits. No hosted deployment, rule import or
+release change performed. Validation: 67 backend tests, 127 smoke tests and module
+syntax checks PASS. Live browser/REST/cache capacity/retention acceptance pending.
+
 ## Queue read-efficiency hardening — 2026-10-29
 
 Inactive drains with no retired cancellation epochs now perform only the status

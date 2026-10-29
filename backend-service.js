@@ -2,10 +2,12 @@
 (() => {
   "use strict";
   const C = globalThis.FudgeBackendContract || (typeof require === "function" ? require("./backend-contract.js") : null);
+  const Catalog = globalThis.FudgeBackendCatalog || (typeof require === "function" ? require("./backend-catalog.js") : null);
   class BackendError extends Error {
     constructor(code, message, retryAfter = 0) { super(message); this.code = code; this.retryAfter = retryAfter; }
   }
-  function create({ local, session, fetch: requestFetch, now = Date.now, random = Math.random, releaseUploads = false }) {
+  function create({ local, session, fetch: requestFetch, now = Date.now, random = Math.random, releaseUploads = false, releaseCatalog = false }) {
+    const catalog = Catalog.create({ local, now });
     let chain = Promise.resolve(), draining = false;
     const serial = (work) => { const next = chain.catch(() => {}).then(work); chain = next.catch(() => {}); return next; };
     const setStatus = (state, reason = "") => local.set({ fudgeBackendStatus: { state, reason, updatedAt: now() } });
@@ -97,7 +99,7 @@
           if (recentReceipts.length > 20) recentReceipts.pop();
         }
       }
-      return { ok: true, releaseUploads, signedIn: Boolean(auth), userId: auth?.userId || null, enabled: config?.enabled === true,
+      return { ok: true, releaseUploads, releaseCatalog, signedIn: Boolean(auth), userId: auth?.userId || null, enabled: config?.enabled === true,
         organizationId: config?.organizationId || null, publishableKey: keyValid(fudgeBackendPublishableKey) ? fudgeBackendPublishableKey : "", counts, blockedItems, recentReceipts,
         state: fudgeBackendStatus.state || "off", reason: fudgeBackendStatus.reason || "" };
     }
@@ -170,6 +172,19 @@
       }
       return { ok: true, projectRef: C.PROJECT_REF, organizationId: config.organizationId, checkedAt: now(),
         checks: ["verified_staff", "records_read_surface", "revisions_read_surface"], uploadsReleased: releaseUploads };
+    }
+    async function refreshCatalog() {
+      if (!releaseCatalog) throw new BackendError("release", "Catalog downloads remain off pending reviewed deployment and configuration ownership acceptance.");
+      const config = await configValue();
+      if (!C.validTarget(config)) throw new BackendError("configuration", "Sign in and connect your business first.");
+      const auth = await ensureSession();
+      if (auth.userId !== config.userId || await verifyUser(auth) !== auth.userId
+        || !(await workspaces(auth)).some((item) => item.id === config.organizationId)) throw new BackendError("permission", "Sign in as authorized staff for this business.");
+      const result = await catalog.refresh(config, () => request("/rest/v1/rpc/reporting_get_service_catalog_v1", auth, { org: config.organizationId }));
+      // UI receives safe metadata only; no application to shared.js/serviceRules.
+      return { ok: true, state: result.state, available: result.available,
+        generation: result.snapshot?.generation ?? null, revision: result.snapshot?.revision ?? null,
+        rules: result.available ? result.snapshot.rules.length : 0, applied: false };
     }
     async function setEnabled(enabled, confirmed) {
       const config = await configValue();
@@ -283,6 +298,7 @@
       status, signIn: (input) => serial(() => signIn(input)), signUp: (input) => serial(() => signUp(input)), createAccount: () => serial(createAccount), workspaces: () => serial(async () => ({ ok: true, workspaces: await workspaces(await ensureSession()) })),
       selectWorkspace: (org) => serial(() => selectWorkspace(org)), setEnabled: (enabled, confirmed) => serial(() => setEnabled(enabled, confirmed)),
       testConnection: () => serial(testConnection),
+      refreshCatalog: () => serial(refreshCatalog),
       signOut: () => serial(signOut), queueHistory: (confirmed) => serial(() => queueHistory(confirmed)), retryBlocked: () => serial(retryBlocked), cancelPending: (confirmed) => serial(() => cancelPending(confirmed)),
       drain: () => {
         if (draining) return Promise.resolve({ ok: true, busy: true });

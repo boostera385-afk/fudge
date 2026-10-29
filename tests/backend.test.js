@@ -7,6 +7,7 @@ const vm = require("node:vm");
 globalThis.crypto ||= webcrypto;
 const C = require("../backend-contract.js");
 const { create } = require("../backend-service.js");
+const Catalog = require("../backend-catalog.js");
 const root = path.resolve(__dirname, "..");
 const user = "11111111-1111-4111-8111-111111111111";
 const otherUser = "22222222-2222-4222-8222-222222222222";
@@ -17,6 +18,118 @@ const key = "sb_publishable_fixture_not_a_real_key";
 const clock = Date.parse("2026-10-28T12:00:00Z");
 const config = { version: 1, targetId: target, userId: user, organizationId: org, enabled: true };
 const original = { id: "google:fixture-review", googleReviewId: "fixture-review", text: "Original fixture source text.", rating: 5, author: "Fixture author", placeName: "Fixture business", placeId: "fixture-place", sourceUrl: "https://www.google.com/maps?fixture=1", photos: ["https://images.example/fixture.jpg"], date: "A week ago", collectedAt: "2026-10-27T12:00:00Z", service: { id: "fixture" } };
+
+const catalogRule = { keyword: "Fixture service", searchTerm: "fixture", family: "Fixtures", subcategory: "Fixture", businessSignals: [], reviewSignals: [], requiredSignals: [], topicSignals: [], excludeSignals: [], topicRequired: false, collectFamilyInventory: true, rewriteServicePhrase: "", equivalentServicePhrases: [] };
+const catalogSnapshot = { version: 1, organizationId: org, generation: 1, revisionId: target, revision: 1, rules: [catalogRule] };
+test("catalog release gate refuses network access even for a signed-in target", async () => {
+  const f = setup();
+  await assert.rejects(f.service.refreshCatalog(), /Catalog downloads remain off/);
+  assert.equal(f.calls.length, 0);
+  assert.match(fs.readFileSync(path.join(root, "backend-worker.js"), "utf8"), /const CATALOG_DOWNLOAD_RELEASED = false/);
+});
+test("catalog validator matches exact bounded rules and rejects tenant mismatch/collisions", () => {
+  assert.equal(Catalog.validSnapshot(catalogSnapshot, org), true);
+  const invalid = [
+    { ...catalogSnapshot, organizationId: otherOrg }, { ...catalogSnapshot, generation: 0 }, { ...catalogSnapshot, injected: "no" },
+    { ...catalogSnapshot, rules: [] }, { ...catalogSnapshot, rules: [{ ...catalogRule, topicRequired: "false" }] },
+    { ...catalogSnapshot, rules: [catalogRule, { ...catalogRule, keyword: "Fixture-service," }] },
+    { ...catalogSnapshot, rules: [{ ...catalogRule, excludeSignals: ["\u0000"] }] },
+  ];
+  for (const value of invalid) assert.equal(Catalog.validSnapshot(value, org), false);
+});
+test("catalog cache keeps last-good data offline and never changes collection rules", async () => {
+  const local = storage({ serviceRules: [{ keyword: "Existing Sheet rule" }] });
+  const cache = Catalog.create({ local: local.area, now: () => clock });
+  const first = await cache.refresh(config, async () => catalogSnapshot);
+  assert.equal(first.state, "downloaded"); assert.equal(first.available, true);
+  const before = structuredClone(local.data);
+  const offline = await cache.refresh(config, async () => { throw { code: "transient" }; });
+  assert.equal(offline.state, "offline_cached"); assert.deepEqual(offline.snapshot, catalogSnapshot);
+  assert.deepEqual(local.data, before);
+  assert.deepEqual(local.data.serviceRules, [{ keyword: "Existing Sheet rule" }]);
+});
+test("invalid or conflicting catalog responses never overwrite a good cache", async () => {
+  const local = storage(), cache = Catalog.create({ local: local.area });
+  await cache.refresh(config, async () => catalogSnapshot);
+  const before = structuredClone(local.data);
+  const invalid = await cache.refresh(config, async () => ({ ...catalogSnapshot, organizationId: otherOrg }));
+  assert.equal(invalid.state, "invalid_response"); assert.equal(invalid.available, false);
+  const conflict = await cache.refresh(config, async () => ({ ...catalogSnapshot, rules: [{ ...catalogRule, family: "Changed" }] }));
+  assert.equal(conflict.state, "generation_conflict"); assert.equal(conflict.available, false);
+  assert.deepEqual(local.data, before);
+});
+test("catalog generations prevent downgrade but allow an explicit higher-generation rollback", async () => {
+  const local = storage(), cache = Catalog.create({ local: local.area });
+  const newer = { ...catalogSnapshot, generation: 3, revision: 3, revisionId: otherOrg };
+  await cache.refresh(config, async () => newer);
+  const stale = await cache.refresh(config, async () => catalogSnapshot);
+  assert.equal(stale.state, "stale_response"); assert.equal(stale.snapshot.revision, 3);
+  const rollback = await cache.refresh(config, async () => ({ ...catalogSnapshot, generation: 4 }));
+  assert.equal(rollback.state, "downloaded"); assert.equal(rollback.snapshot.revision, 1);
+});
+test("cache restart preserves data while different accounts/businesses never inherit it", async () => {
+  const local = storage(); await Catalog.create({ local: local.area }).refresh(config, async () => catalogSnapshot);
+  const restarted = Catalog.create({ local: local.area });
+  const offline = async () => { throw { code: "transient" }; };
+  assert.equal((await restarted.refresh(config, offline)).available, true);
+  assert.equal((await restarted.refresh({ ...config, userId: otherUser }, offline)).available, false);
+  assert.equal((await restarted.refresh({ ...config, organizationId: otherOrg }, offline)).available, false);
+});
+test("authorization failure or unpublished configuration is not permission to use a saved catalog", async () => {
+  const local = storage(), cache = Catalog.create({ local: local.area });
+  await cache.refresh(config, async () => catalogSnapshot);
+  const before = structuredClone(local.data);
+  for (const code of ["auth", "permission"]) {
+    const result = await cache.refresh(config, async () => { throw { code }; });
+    assert.equal(result.available, false); assert.equal(result.snapshot, null);
+  }
+  assert.equal((await cache.refresh(config, async () => null)).state, "unpublished");
+  assert.deepEqual(local.data, before);
+});
+test("catalog storage failure does not claim the downloaded revision was saved", async () => {
+  const local = storage(), cache = Catalog.create({ local: local.area });
+  await cache.refresh(config, async () => catalogSnapshot);
+  local.area.set = async () => { throw new Error("PRIVATE_STORAGE_DETAILS"); };
+  const result = await cache.refresh(config, async () => ({ ...catalogSnapshot, generation: 2 }));
+  assert.equal(result.state, "storage_failed"); assert.equal(result.snapshot.generation, 1);
+  assert.ok(!JSON.stringify(result).includes("PRIVATE_STORAGE_DETAILS"));
+});
+test("semantically identical object-key ordering does not create a catalog conflict", async () => {
+  const local = storage(), cache = Catalog.create({ local: local.area });
+  await cache.refresh(config, async () => catalogSnapshot);
+  const reversed = { ...catalogSnapshot, rules: [Object.fromEntries(Object.entries(catalogRule).reverse())] };
+  assert.equal((await cache.refresh(config, async () => reversed)).state, "unchanged");
+});
+test("concurrent cache refreshes serialize and cannot overwrite a newer generation", async () => {
+  const local = storage(), cache = Catalog.create({ local: local.area });
+  const results = await Promise.all([
+    cache.refresh(config, async () => ({ ...catalogSnapshot, generation: 3 })),
+    cache.refresh(config, async () => catalogSnapshot),
+  ]);
+  assert.equal(results[0].state, "downloaded"); assert.equal(results[1].state, "stale_response");
+  assert.equal(results[1].snapshot.generation, 3);
+});
+test("review-released catalog download verifies membership and returns metadata without applying rules", async () => {
+  const f = setup({ releaseCatalog: true, released: false });
+  const base = accountHandler();
+  f.handle((url, options) => url.endsWith("/rpc/reporting_get_service_catalog_v1") ? json(catalogSnapshot) : base(url, options));
+  const before = structuredClone(f.local.data.fudgeBackendConfig);
+  const result = await f.service.refreshCatalog();
+  assert.deepEqual(result, { ok: true, state: "downloaded", available: true, generation: 1, revision: 1, rules: 1, applied: false });
+  assert.deepEqual(f.local.data.fudgeBackendConfig, before);
+  assert.equal(f.local.data.serviceRules, undefined);
+  assert.ok(!JSON.stringify(result).includes("Fixture service"));
+  assert.ok(!f.calls.some((call) => call.url.includes("reporting_ingest_fudge")));
+  assert.deepEqual(JSON.parse(f.calls.find((call) => call.url.endsWith("/rpc/reporting_get_service_catalog_v1")).options.body), { org });
+});
+test("catalog download refuses signed-out or unverified users before fetching rules", async () => {
+  const signedOut = setup({ releaseCatalog: true, signedIn: false });
+  await assert.rejects(signedOut.service.refreshCatalog(), /Sign in again/);
+  assert.equal(signedOut.calls.length, 0);
+  const f = setup({ releaseCatalog: true }); f.handle(accountHandler({ verified: false }));
+  await assert.rejects(f.service.refreshCatalog(), /verified/);
+  assert.ok(!f.calls.some((call) => call.url.includes("/rpc/")));
+});
 
 function storage(initial = {}) {
   const data = structuredClone(initial), writes = [];
@@ -38,7 +151,7 @@ function storage(initial = {}) {
   return { data, writes, area };
 }
 const json = (value, status = 200, headers = {}) => new Response(JSON.stringify(value), { status, headers });
-function setup({ released = true, initialConfig = config, signedIn = true } = {}) {
+function setup({ released = true, initialConfig = config, signedIn = true, releaseCatalog = false } = {}) {
   let time = clock;
   const local = storage({ fudgeBackendConfig: structuredClone(initialConfig), reviews: [original] });
   const session = storage(signedIn ? { fudgeBackendSession: { userId: user, publishableKey: key, accessToken: "fixture-access-private", refreshToken: "fixture-refresh-private", expiresAt: clock + 3600000 } } : {});
@@ -67,7 +180,7 @@ function setup({ released = true, initialConfig = config, signedIn = true } = {}
   };
   const defaultHandler = (url, options) => handler(url, options);
   const fetch = async (url, options) => { calls.push({ url, options }); return defaultHandler(url, options); };
-  const service = create({ local: local.area, session: session.area, fetch, now: () => time, random: () => 0.5, releaseUploads: released });
+  const service = create({ local: local.area, session: session.area, fetch, now: () => time, random: () => 0.5, releaseUploads: released, releaseCatalog });
   return { local, session, calls, service, advance: (ms) => { time += ms; }, handle: (fn) => { handler = fn; }, enqueue: async (review = original, destination = initialConfig) => {
     const values = C.captureWrites(destination, [review], { now: time }); await local.area.set(values); return Object.keys(values)[0];
   } };

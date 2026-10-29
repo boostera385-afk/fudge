@@ -2,10 +2,11 @@
 (() => {
   "use strict";
   const UPLOAD_RELEASED = false;
+  const CATALOG_DOWNLOAD_RELEASED = false;
   const ALARM = "fudge-backend-upload";
   if (!chrome.storage.session) return;
   const service = FudgeBackendService.create({ local: chrome.storage.local, session: chrome.storage.session,
-    fetch: (...args) => fetch(...args), releaseUploads: UPLOAD_RELEASED });
+    fetch: (...args) => fetch(...args), releaseUploads: UPLOAD_RELEASED, releaseCatalog: CATALOG_DOWNLOAD_RELEASED });
   let ready = chrome.storage.session.setAccessLevel({ accessLevel: "TRUSTED_CONTEXTS" });
   const run = async (work) => { await ready; return work(); };
   async function ensureAlarm() {
@@ -28,6 +29,7 @@
     BACKEND_WORKSPACES: () => service.workspaces(),
     BACKEND_SELECT_WORKSPACE: (m) => service.selectWorkspace(m.organizationId),
     BACKEND_TEST_CONNECTION: () => service.testConnection(),
+    BACKEND_REFRESH_CATALOG: () => service.refreshCatalog(),
     BACKEND_ENABLE: (m) => service.setEnabled(m.enabled === true, m.confirmed === true),
     BACKEND_SIGN_OUT: () => service.signOut(),
     BACKEND_QUEUE_HISTORY: (m) => service.queueHistory(m.confirmed === true),
