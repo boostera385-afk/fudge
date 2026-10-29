@@ -1,5 +1,18 @@
 # Fudge backend implementation status
 
+## Shared catalog deployment handoff — 2026-10-29
+
+After explicit authorization, the dashboard applied catalog source
+`20261029165237` as hosted `20261029165416` and follow-up FK-index source
+`20261029165727` as hosted `20261029165815`. Hosted rollback-only save/replay/
+activation/rollback/access-denial smoke passed; no fixture records remain. No
+business catalog imported or activated. Dashboard now offers explicit inactive
+staging only; signed-in browser acceptance and diff/activation UI remain pending.
+Its current full validation: 596 tests / 38 files, typecheck, lint and build PASS.
+No Fudge source changed in this handoff; prior 67 backend/127 smoke results are
+historical. Both Fudge release gates remain false and existing Sheet rules remain
+unchanged. See dashboard `DB-DEPLOYMENT-20261029-CATALOG.md` for full evidence.
+
 ## Versioned catalog cache development — 2026-10-29
 
 Added `backend-catalog.js` and a trusted internal read-preview command, independently

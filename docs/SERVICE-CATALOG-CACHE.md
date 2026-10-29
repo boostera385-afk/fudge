@@ -29,15 +29,17 @@ No catalog is applied to `serviceRules`, shared classification or Sheet sync.
 
 `CATALOG_DOWNLOAD_RELEASED = false` in `backend-worker.js` blocks the command before
 network work; the setup button stays disabled. `UPLOAD_RELEASED` independently
-remains false. The proposed read RPC is
-`reporting_get_service_catalog_v1`; the matching database implementation is only a
-local draft in the ND dashboard repo's `supabase/drafts/service_catalog_v1.sql`.
-Do not enable downloads before reviewed migration deployment and live acceptance.
+remains false. The read RPC is `reporting_get_service_catalog_v1`; its database
+implementation is deployed from dashboard source `20261029165237_service_catalog_v1.sql`
+as hosted `20261029165416`, with FK indexes source `20261029165727` / hosted
+`20261029165815`. See dashboard `docs/DB-DEPLOYMENT-20261029-CATALOG.md`. Hosted
+rollback-only SQL smoke passed and retained no fixture rows. Do not enable downloads
+merely because SQL passed; actual Auth/REST/permissions and ownership acceptance remain.
 
 ## Remaining gates
 
-Reviewed migration promotion/deployment; real REST/Auth/RLS/connection contention;
-dashboard save/diff/activate UI and explicit approval; freshness/retention/deletion
+Real REST/Auth/RLS/connection contention; live acceptance of dashboard inactive
+staging, exact revision diff/activation UI and explicit approval; freshness/retention/deletion
 policy and storage-pressure bounds; offline-expired-auth behavior acceptance;
 browser recovery; classification fixtures; and single-writer handoff from existing
 Services sync. The cache does not itself clear, merge or replace any current rules.
