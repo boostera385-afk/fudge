@@ -1,5 +1,102 @@
 # Fudge backend implementation status
 
+## Dashboard identity/workspace security handoff — 2026-10-29
+
+The dashboard now implements central fresh-user/email-confirmation checks before
+business reads and actions, explicit authorized workspace selection for multiple
+memberships, account-bound untrusted session preferences, and stale-form context
+rejection for all 30 existing business form action entrypoints. Single-business
+staff retain automatic selection. Revoked selection does not silently switch to
+another business. Notification feed/acknowledgment and handled-ID storage use the
+same account/business context. Switching changes no worker/session authorization.
+
+Real-DAL tests do not mock the guard; fixtures cover unconfirmed/direct-action
+rejection, role/revocation/overflow/malformed results, old tabs/accounts, cookie
+flags and UI. Dashboard full validation passed: typecheck, lint, **712 tests /
+50 files**, production build, and signed-out local route HTTP checks (temporary
+test server stopped afterward). Fudge freshly reran **67 backend + 127 smoke**
+tests and all tracked JS/CJS syntax checks: PASS. This is application-layer hardening, not a deployed SQL policy
+change or new live cross-account/browser acceptance. Fudge's existing independent
+verified-session/business checks remain unchanged; sessions are still separate.
+
+No Fudge source change or extension deployment. Both release gates remain false,
+backend catalog application and real Sheet delivery stay unwired. No live upload,
+Sheet edit, browser operation or production migration occurred. The shared master
+plans contain the same new checkpoint; frozen pre-test checkpoints are unchanged
+and both shared file pairs remain byte-identical. The audit
+below remains historical evidence; its central-app/selection gaps are superseded
+in source by this slice, not all remaining automation gaps.
+
+## Cross-repository readiness review — 2026-10-29
+
+**NOT READY for end-to-end automation; passing fixtures are not an error-free or
+live-production certification.** Dashboard's current `docs/IMPLEMENTATION-STATUS.md`
+contains the detailed source/hosted findings. This entry supersedes stale counts
+below, not the frozen pre-test checkpoint or remaining feature acceptance gates.
+
+Fresh checks actually run:
+- `node --test tests/backend.test.js`: **67 PASS**.
+- `node tests/smoke.test.js`: **127 PASS**.
+- `node --check` for every tracked `.js`/`.cjs`: PASS.
+- Dashboard: typecheck/lint PASS, **649 tests / 43 files PASS**, build PASS;
+  production-dependency npm audit reports zero known vulnerabilities.
+- Worker: **35 unittest cases PASS**; current Python interpreter lacks Playwright
+  and documented private worker/adapter files were not found. No browser ran.
+- Shared master plans and frozen readiness checkpoints remain byte-identical;
+  all F01–F36/N01–N08 tracker IDs are present once, none fully signed off.
+
+Shared hosted target reverified read-only: **11 deployed migrations, not 12**;
+the dashboard's twelfth local file is the intentionally undeployed publishing
+protocol. Do not apply this repo's superseded per-user ingestion experiment or
+blindly push either migration directory. All 50 deployed function bodies match
+the applied dashboard source (CRLF/edge whitespace normalized; aggregate MD5
+`3a152185d42690fe6f4b8c9790039072`). All 25 public tables have RLS; anonymous
+table reads and authenticated direct table mutations are denied. This is not a
+full schema/constraint parity or live tenant-isolation certification. ND Test
+has generation 1 with **2 test rules**, not the 21-rule business catalog; intake,
+bindings, publications, check jobs and writeback intents remain zero. No hosted
+publishing table or Edge Function exists.
+
+Business/source link saved locally in both repos at
+`backups/business-source/REFERENCE.private.json`, confirmed Git-excluded. It is
+not the operational ND Master. Anonymous read-only Services/keyword probes
+found **21 rules / 41 distinct request keywords / 27 exact missing mappings**;
+rule fields equal the previous private snapshot. Dashboard preview/contract and
+Fudge snapshot validation accept the 21 rules (0 errors, 23 warnings), and all
+configured keyword identities resolve offline. Semantic matching of the 27
+exact misses remains unaccepted; no aliases were invented. No review, phone,
+name or media values were fetched. Owner review of anonymously readable business
+sharing is recommended; permissions were not changed.
+
+`UPLOAD_RELEASED` and `CATALOG_DOWNLOAD_RELEASED` stay **false**. Backend cache
+never applies rules; `sheets.js` Services sync still owns `serviceRules`. No
+dashboard outbox deliverer, connected publisher, one-click dated-cohort refresh,
+or dashboard profile/onboarding/cookie/proxy execution exists. Keep desktop and
+legacy workflows preserved and non-overlapping; no automation was started.
+
+Review findings also include the dashboard's missing central verified-email
+check for an already-sessioned/member unconfirmed user (newer protocol actions
+check explicitly; fresh unassigned signup access was not demonstrated), unordered
+first-membership selection for multi-business users, and unaccepted recovery,
+real-browser/MV3, concurrency and retention/deletion gates. Legacy first-person
+identity/service-changing rewrite prompts and Drive `ANYONE_WITH_LINK` sharing
+must not be silently carried into the new pipeline: require lawful rights,
+truthful attribution and private-media/retention decisions before cutover.
+
+Hosted advisors still report 3 anon-executable worker and 21 authenticated
+SECURITY DEFINER notices, disabled leaked-password protection, an intentional
+private no-policy INFO and 27 unused-index INFOs; not a clean security bill.
+Remediation: [worker RPCs](https://supabase.com/docs/guides/database/database-linter?lint=0028_anon_security_definer_function_executable),
+[staff RPCs](https://supabase.com/docs/guides/database/database-linter?lint=0029_authenticated_security_definer_function_executable),
+[password protection](https://supabase.com/docs/guides/auth/password-security#password-strength-and-leaked-password-protection).
+No real secrets or private business references found by targeted tracked-file
+scans (not a whole-history security audit). SMTP remains deliberately deferred
+for the internal tool; the older signup instructions do not prove email delivery.
+
+Only local private reference and status documentation changed. No source edits,
+schema changes, production writes, Sheet edits, extension deployment, installs,
+release changes, commits or pushes were performed.
+
 ## Live-testing readiness checkpoint — 2026-10-29
 
 The dashboard repository added the explicit Sheet writeback queue UI
