@@ -7,7 +7,7 @@ After explicit authorization, the dashboard applied catalog source
 `20261029165727` as hosted `20261029165815`. Hosted rollback-only save/replay/
 activation/rollback/access-denial smoke passed; no fixture records remain. No
 business catalog imported or activated. Dashboard now offers explicit inactive
-staging only; signed-in browser acceptance and diff/activation UI remain pending.
+staging, exact immutable-revision review/diff and owner/admin activation; signed-in browser acceptance remains pending.
 Its current full validation: 596 tests / 38 files, typecheck, lint and build PASS.
 No Fudge source changed in this handoff; prior 67 backend/127 smoke results are
 historical. Both Fudge release gates remain false and existing Sheet rules remain

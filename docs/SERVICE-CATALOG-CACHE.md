@@ -38,8 +38,8 @@ merely because SQL passed; actual Auth/REST/permissions and ownership acceptance
 
 ## Remaining gates
 
-Real REST/Auth/RLS/connection contention; live acceptance of dashboard inactive
-staging, exact revision diff/activation UI and explicit approval; freshness/retention/deletion
+Real REST/Auth/RLS/connection contention; live signed-in acceptance of dashboard
+inactive staging and the exact revision review/owner-admin activation UI; freshness/retention/deletion
 policy and storage-pressure bounds; offline-expired-auth behavior acceptance;
 browser recovery; classification fixtures; and single-writer handoff from existing
 Services sync. The cache does not itself clear, merge or replace any current rules.
