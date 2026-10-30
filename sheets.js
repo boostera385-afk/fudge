@@ -517,6 +517,10 @@ const SheetsService = (() => {
       // previous sync's rules in the middle of this run.
       await chrome.storage.local.set({ serviceRules });
       const activeServiceKeywords = services.filter((service) => !service.paused).map((service) => service.keyword);
+      // A paused trade drops every review it finds during collection, so its scans
+      // can never fill the row that reads "Waiting for reviews". Job generation
+      // must respect the same switch the scanner already applies.
+      const pausedKeywordSet = new Set(services.filter((service) => service.paused).map((service) => Fudge.normalize(service.keyword)));
       // Search Progress is the single source of truth for what has been exhausted.
       // The Cities tab is the user's input list plus a readable mirror of that truth.
       const progressByKey = new Map(progressRows.map((row, index) => [clean(row[0]), { row: pad(row, PROGRESS_HEADERS.length), rowNumber: index + 2 }]).filter(([key]) => key));
@@ -879,6 +883,7 @@ const SheetsService = (() => {
       const nextJobs = [];
       const claimedKeywords = new Set();
       const exhaustedEverywhere = [];
+      const pausedEverywhere = [];
       // A keyword whose rows are all filled already has what it needs; any deficit
       // left on it is the spare buffer. Those go to the back, so every keyword with
       // an empty row is searched for first and the buffer is only topped up once
@@ -889,6 +894,13 @@ const SheetsService = (() => {
         if (deficit.amount <= 0) continue;
         const keywordKey = Fudge.normalize(deficit.service);
         if (claimedKeywords.has(keywordKey)) continue;
+        if (pausedKeywordSet.has(keywordKey)) {
+          // Scanning for a paused trade can only exhaust cities: collection keeps
+          // active Services trades only, so nothing it finds can fill the row.
+          // Report it so the panel can explain why the row keeps waiting.
+          pausedEverywhere.push(deficit.service);
+          continue;
+        }
         const target = resolveTarget(deficit);
         if (!target) {
           // Every city for this keyword is used up. Report it, then carry on down
@@ -909,7 +921,7 @@ const SheetsService = (() => {
       // installed, deleted, or disabled by Google after a run of failures — try
       // once per sync to put them back, then report whatever is still wrong.
       const repairAutomation = Boolean(connectorAutomation && !(connectorAutomation.queueTrigger && connectorAutomation.rephraseTrigger));
-      const status = { ok: true, syncedAt: now(), spreadsheetId, connectorOutdated, serviceCount: activeServiceKeywords.length, newReviews: newRows.length, nextJobs, filled: unfilled.length - structureState.filter((state) => !state.row[8] && !state.row[4]).length, nextJob, cityCount: cities.length, exhaustedEverywhere: [...new Set(exhaustedEverywhere)], automation: connectorAutomation };
+      const status = { ok: true, syncedAt: now(), spreadsheetId, connectorOutdated, serviceCount: activeServiceKeywords.length, newReviews: newRows.length, nextJobs, filled: unfilled.length - structureState.filter((state) => !state.row[8] && !state.row[4]).length, nextJob, cityCount: cities.length, exhaustedEverywhere: [...new Set(exhaustedEverywhere)], pausedEverywhere: [...new Set(pausedEverywhere)], automation: connectorAutomation };
       softFailures = 0;
       const sheetKnownReviewContentKeys = [...new Set(inventory.map((item) => Fudge.reviewContentKey(item)).filter(Boolean))];
       await chrome.storage.local.set({ sheetsStatus: status, activeServiceKeywords, serviceRules, sheetKnownReviewIds: [...reviewById.keys()], sheetKnownReviewFingerprints: [...reviewByFingerprint.keys()], sheetKnownReviewContentKeys });

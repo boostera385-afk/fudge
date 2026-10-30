@@ -1304,6 +1304,20 @@ async function testServicesTabDrivesCollection() {
   assert.equal(paused.values[0][1], "Paused");
 }
 
+// A paused trade drops every review it finds during collection, so scans for it
+// can never fill the "Waiting for reviews" row behind it — they just burn
+// through cities. Job generation must obey the same Services-tab switch the
+// scanner already applies, and say which trades are waiting on that switch.
+async function testPausedTradesDoNotOpenScans() {
+  const structureRows = [["REQ-2", "With Picture", "flooring installation", ""], ["REQ-3", "With Picture", "Gutter cleaning", ""]];
+  const cityRows = [["Dallas, TX"], ["Houston, TX"]];
+  const serviceRows = [["flooring installation"], ["Gutter cleaning", "Paused"]];
+  const { result } = await runSheetsSync({ structureRows, reviewRows: [], cityRows, serviceRows });
+  assert.equal(result.nextJobs.length, 1, "only the active trade may earn a scan");
+  assert.equal(result.nextJobs[0].serviceKeyword, "flooring installation", "the paused trade must not have a job opened for it");
+  assert.deepEqual([...result.pausedEverywhere], ["Gutter cleaning"], "the panel must be able to name the paused trade that keeps its row waiting");
+}
+
 // A connector deployed before the Cities/Services tabs existed rejects the whole
 // read. Fudge must still sync the tabs it does understand.
 async function testOutdatedConnectorStillSyncs() {
@@ -3068,6 +3082,47 @@ async function testClosingTheRunnerTabEndsItsJob() {
   assert.equal(scanJobs.live.status, "interrupted", "a closed tab must end its job");
 }
 
+// A scan that dies on the same results page keeps its Sheet checkpoint, so the
+// unattended loop used to walk straight back into the same broken page every
+// pass — the exact "stops during scraping and never progresses" stall. After
+// three fruitless rounds the keyword stands down; a human Start or Sync now is
+// someone asking for work, so it always gets one more go.
+async function testDeadPagesStandDownInsteadOfRetryingForever() {
+  const store = storage({
+    runState: "running",
+    scanErrorStrikes: { "flooring installation|dallas, tx|photo": 3 }
+  });
+  const tabs = [];
+  const queued = [{ auto: true, searchKey: "flooring installation|dallas, tx|photo", serviceKeyword: "flooring installation", city: "Dallas, TX", query: "flooring installation \"Dallas, TX\"", reviewMode: "photo", targetCount: 3, currentPage: 1, businessIndex: 0, visitedPlaceIds: [] }];
+  const context = backgroundContext(store, { queued, tabs });
+
+  const held = await context.runSheetsAutomation({ force: true });
+  assert.equal(held.startedJob, false, "an unattended pass must not reopen a page that only ever fails");
+  assert.equal(tabs.length, 0, "no tab may be opened for a struck-out keyword");
+  assert.deepEqual([...held.strikeHeld], ["flooring installation"], "the pass must name what it held back");
+  const afterHeld = await store.local.get({ sheetsStatus: null });
+  assert.match(afterHeld.sheetsStatus?.notice || "", /Held back/, "the status must explain the stand-down instead of looking idle");
+
+  const human = await context.runSheetsAutomation({ force: true, interactive: true });
+  assert.equal(human.startedJob, true, "a human request always gets one more attempt");
+  assert.equal(tabs.length, 1, "and it really opens the runner");
+
+  // A run that saves reviews is progress, not a dead page: it clears the count.
+  const clearing = storage({
+    runState: "running",
+    scanJobs: { done: { id: "done", auto: true, tabId: 31, status: "running", searchKey: "flooring installation|dallas, tx|photo", updatedAt: new Date().toISOString() } },
+    scanErrorStrikes: { "flooring installation|dallas, tx|photo": 2 }
+  });
+  const completeContext = backgroundContext(clearing, {
+    queued,
+    tabs: [{ id: 31, url: "https://www.google.com/search?q=x&udm=local", status: "complete" }]
+  });
+  await askBackground(completeContext, { type: "SCAN_JOB_COMPLETE", patch: { id: "done", stage: "Target reached 3 reviews", reviewsSaved: 3, currentPage: 1, businessIndex: 1, visitedPlaceIds: [] } });
+  await new Promise((resolve) => setTimeout(resolve, 10));
+  const { scanErrorStrikes } = await clearing.local.get({ scanErrorStrikes: {} });
+  assert.equal(scanErrorStrikes["flooring installation|dallas, tx|photo"], undefined, "a run that saved reviews clears the strikes");
+}
+
 async function testConcurrentJobUpdatesAndLateHeartbeat() {
   const store = storage({ runState: "running", scanJobs: {
     a: { id: "a", tabId: 1, status: "running" },
@@ -3918,6 +3973,7 @@ function testTransientRephraseFailureIsRetriedLater() {
     ["collecting card ignores page detection", testCollectingCardIgnoresPageDetection],
     ["stale running jobs release their slot", testStaleRunningJobsReleaseTheirSlot],
     ["closing the runner tab ends its job", testClosingTheRunnerTabEndsItsJob],
+    ["dead pages stand down instead of retrying forever", testDeadPagesStandDownInsteadOfRetryingForever],
     ["concurrent jobs and late heartbeat", testConcurrentJobUpdatesAndLateHeartbeat],
     ["new reviews trigger coalesced sync", testNewReviewsTriggerCoalescedSync],
     ["orphan runner tabs are closed", testOrphanRunnerTabsAreClosed],
@@ -3991,6 +4047,7 @@ function testTransientRephraseFailureIsRetriedLater() {
     ["Sheet-managed service rules", testSheetManagedServiceRules],
     ["Services rules drive search and persist", testServicesRulesDriveSearchAndPersist],
     ["Services tab drives collection", testServicesTabDrivesCollection],
+    ["paused trades do not open scans", testPausedTradesDoNotOpenScans],
     ["review topic selection", testReviewTopicSelection],
     ["toilet topic required at general plumbers", testToiletTopicIsRequiredAtGeneralPlumbers],
     ["specialised business needs no filter", testSpecialisedBusinessNeedsNoFilter],

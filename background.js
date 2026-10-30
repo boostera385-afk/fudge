@@ -76,6 +76,27 @@ const setLocal = (value) => chrome.storage.local.set(value);
 const isRunning = async () => (await getLocal({ runState: RUN_STATE_STOPPED })).runState === RUN_STATE_RUNNING;
 const configuredParallelTabs = async () => safeParallelTabs((await getLocal({ parallelTabs: DEFAULT_PARALLEL_TABS })).parallelTabs);
 
+// A scan that dies on the same page error keeps its Sheet checkpoint, so every
+// unattended retry walks back into the same broken page — the exact "stops
+// during scraping and never progresses" loop. After this many fruitless rounds
+// the keyword/city stands down; a human Start or Sync now always gets one fresh
+// attempt, and any run that ends normally or saves reviews clears the count.
+const SCAN_ERROR_STRIKE_LIMIT = 3;
+const DEAD_PAGE_STRIKE = /results did not load|could not load|stopped with an error|reviews unavailable/i;
+async function recordScanStrike(searchKey, hit) {
+  if (!searchKey) return;
+  const { scanErrorStrikes = {} } = await getLocal({ scanErrorStrikes: {} });
+  const next = { ...scanErrorStrikes };
+  if (!hit) delete next[searchKey];
+  else next[searchKey] = Math.min((next[searchKey] || 0) + 1, SCAN_ERROR_STRIKE_LIMIT);
+  await setLocal({ scanErrorStrikes: next });
+}
+async function scanStrikeHeld(searchKey) {
+  if (!searchKey) return false;
+  const { scanErrorStrikes = {} } = await getLocal({ scanErrorStrikes: {} });
+  return (scanErrorStrikes[searchKey] || 0) >= SCAN_ERROR_STRIKE_LIMIT;
+}
+
 async function ensureSheetsAlarm() {
   const alarm = await chrome.alarms.get(SHEETS_ALARM);
   if (!alarm || alarm.periodInMinutes !== 0.5) await chrome.alarms.create(SHEETS_ALARM, { delayInMinutes: 0.5, periodInMinutes: 0.5 });
@@ -390,6 +411,10 @@ async function automationPass({ force = false, interactive = false, activate = f
     if (!queued.length && result.retrying) queued = await cachedJobSpecs();
     if (!queued.length) return { ...result, startedJob: false };
     // One tab per keyword, started in sequence so the pages do not load together.
+    // A Start or a Sync now is a person asking for work, so it may always have
+    // one more go at a page that stood down; the unattended passes may not.
+    const humanIntent = Boolean(interactive || activate);
+    const strikeHeld = [];
     const running = await liveRunningScanJobs();
     const maxTabs = await configuredParallelTabs();
     const selectedPageLimit = pageLimit == null
@@ -401,13 +426,23 @@ async function automationPass({ force = false, interactive = false, activate = f
     for (const spec of queued) {
       if (started.length + running.length >= maxTabs) break;
       if (busyKeys.has(spec.searchKey)) continue;
+      if (!humanIntent && await scanStrikeHeld(spec.searchKey)) {
+        strikeHeld.push(spec.serviceKeyword || spec.searchKey);
+        continue;
+      }
       // Space out tab openings slightly, without adding a wait after the last one.
       if (started.length) await new Promise((resolve) => setTimeout(resolve, JOB_STAGGER_MS));
       // A failure to open the runner is reported, never swallowed. Reporting it as
       // "no Structure rows are waiting" is what sent people looking at the Sheet
       // for a problem that was in the tab handshake.
       const job = await startAutomaticJob(spec, { activate: activate && started.length === 0, pageLimit: selectedPageLimit })
-        .catch((error) => { startErrors.push(error.message); return null; });
+        .catch(async (error) => {
+          startErrors.push(error.message);
+          // A tab that never comes up repeats every half minute too. Count it the
+          // same way — unless the run was stopped, which is not a dead page.
+          if (!/stopped while google opened|runner tab was closed/i.test(error.message || "")) await recordScanStrike(spec.searchKey, true).catch(() => {});
+          return null;
+        });
       if (!job) continue;
       busyKeys.add(spec.searchKey);
       started.push(job);
@@ -418,7 +453,13 @@ async function automationPass({ force = false, interactive = false, activate = f
       const { sheetsStatus = null } = await getLocal({ sheetsStatus: null });
       await setLocal({ sheetsStatus: { ...(sheetsStatus || {}), ok: true, retrying: true, notice: startErrors[0], noticeAt: new Date().toISOString() } });
     }
-    return { ...result, startedJob: started.length > 0, job: started[0] || null, startedJobs: started, startErrors, runnersBusy: running.length };
+    // Standing a struck-out page down is reported the same way, never silent: the
+    // row is still waiting and only the operator can fix the page or press Start.
+    if (!started.length && !startErrors.length && strikeHeld.length) {
+      const { sheetsStatus = null } = await getLocal({ sheetsStatus: null });
+      await setLocal({ sheetsStatus: { ...(sheetsStatus || {}), ok: true, retrying: true, notice: `Held back: ${strikeHeld[0]} kept failing on the same Google page. Press Start to try it again, or Sync now after checking it.`, noticeAt: new Date().toISOString() } });
+    }
+    return { ...result, startedJob: started.length > 0, job: started[0] || null, startedJobs: started, startErrors, strikeHeld, runnersBusy: running.length };
   } catch (error) {
     // Anything that clears itself is a notice, not a failure: the next pass is a
     // minute away, so there is nothing for anyone to do about it.
@@ -579,6 +620,12 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         else if (!job.error && /^(?:Target reached|Page limit reached|End of results|Complete)/i.test(job.stage || "")) await noteCleanGoogleRun(job);
         const exhausted = !blocked && /end of results|page limit reached/i.test(job.stage || "");
         await SheetsService.recordProgress(job, exhausted).catch(() => {});
+        // The checkpoint keeps the page that just failed, so a dead page would be
+        // retried forever. Count fruitless rounds; a normal ending or a run that
+        // saved reviews clears the count for this keyword/city again.
+        const progressing = exhausted || Number(job.reviewsSaved || 0) > 0 || /^(?:Target reached|Complete)/i.test(job.stage || "");
+        const deadPage = !blocked && (Boolean(job.error) || DEAD_PAGE_STRIKE.test(job.stage || ""));
+        await recordScanStrike(job.searchKey, deadPage && !progressing).catch(() => {});
         if (await isRunning() && !blocked) setTimeout(() => runSheetsAutomation({ force: true }).catch(() => {}), JOB_GAP_MS);
         if (job.tabId) setTimeout(() => chrome.tabs.remove(job.tabId).catch(() => {}), 300);
       }

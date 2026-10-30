@@ -257,6 +257,7 @@ async function render() {
   else if (currentStage) elements.sheetsStatus.textContent = meta.sheetsStatus.stage;
   else if (collecting && meta.sheetsStatus?.stage) elements.sheetsStatus.textContent = "The Sheet check has not finished. Press Sync now to retry.";
   else if (meta.sheetsStatus?.nextJob) elements.sheetsStatus.textContent = `Next: ${meta.sheetsStatus.nextJob.serviceKeyword} · ${meta.sheetsStatus.nextJob.city}`;
+  else if (meta.sheetsStatus?.pausedEverywhere?.length) elements.sheetsStatus.textContent = `Not collecting while paused on the Services tab: ${meta.sheetsStatus.pausedEverywhere.join(", ")}. Resume it there to scan again.`;
   else if (meta.sheetsStatus?.exhaustedEverywhere?.length) elements.sheetsStatus.textContent = `Every city is used up for ${meta.sheetsStatus.exhaustedEverywhere.join(", ")}. Add more cities.`;
   else if (meta.sheetsStatus?.syncedAt) elements.sheetsStatus.textContent = "No Structure rows need collection right now. Add a keyword or raise a target to start more work.";
   else if (setupIncomplete) elements.sheetsStatus.textContent = "The connector secret or URL is missing. Use Change sheet to reconnect.";
@@ -277,6 +278,7 @@ async function render() {
     else if (cooldownMinutes) setState("ready", { label: "Paused", source: `Google cooldown: about ${cooldownMinutes} minute${cooldownMinutes === 1 ? "" : "s"} left` });
     else if (currentStage) setState("ready", { label: "Starting", source: meta.sheetsStatus.stage });
     else if (meta.sheetsStatus?.stage) setState("error", { label: "Sheet check stalled", source: "Press Sync now to retry the Sheet check" });
+    else if (meta.sheetsStatus?.pausedEverywhere?.length) setState("ready", { label: "Trade paused", source: `Resume ${meta.sheetsStatus.pausedEverywhere.join(", ")} on the Services tab` });
     else if (meta.sheetsStatus?.exhaustedEverywhere?.length) setState("ready", { label: "Waiting for cities", source: `Add cities for ${meta.sheetsStatus.exhaustedEverywhere.join(", ")}` });
     else if (meta.sheetsStatus?.syncedAt && !meta.sheetsStatus.nextJobs?.length) setState("ready", { label: "Waiting for work", source: "No Structure rows need collection right now" });
     else setState("ready", { label: "Running", source: "Checking Sheet requirements" });
@@ -297,7 +299,7 @@ elements.connectSheets.addEventListener("click", async () => {
       await chrome.runtime.sendMessage({ type: "OPEN_SHEETS_SETUP" });
       showToast("Follow the two-step setup in the new tab.");
     } else {
-      const result = await chrome.runtime.sendMessage({ type: "RUN_SHEETS_SYNC", force: true });
+      const result = await chrome.runtime.sendMessage({ type: "RUN_SHEETS_SYNC", force: true, interactive: true });
       if (!result?.ok) showToast(result?.error || "Could not sync Google Sheets.", "error");
       else showToast("Checking the Sheet now. Progress appears here shortly.");
     }

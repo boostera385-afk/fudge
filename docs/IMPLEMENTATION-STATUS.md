@@ -1,5 +1,138 @@
 # Fudge backend implementation status
 
+## Owner-reported scraping fixes — 2026-10-30
+
+The owner reported four issues dated 27/OCT/2026: the Sheet's "Waiting for
+Reviews" state, scraping stopping mid-process, setting Fudge up on both ND-room
+systems, and Fudge not opening the expected 4 pages. After a full read-only
+diagnosis of the run loop (root causes with file:line cites, no live
+scraping performed), two code fixes were implemented and verified:
+
+1. **Paused trades no longer earn scans** (`sheets.js`). Job generation
+   previously ignored the Services-tab pause switch that collection applies,
+   so a paused trade's scans were doomed — every result discarded — while its
+   Structure row kept reading "Waiting for reviews" and cities burned down.
+   Job creation now skips paused trades and reports them in a new
+   `pausedEverywhere` status field; the side panel explains them ("Trade
+   paused — resume on the Services tab") instead of letting the row look
+   mysteriously unfilled.
+
+2. **Dead pages stand down instead of retrying forever** (`background.js`,
+   `sidepanel.js`). A scan that dies on the same results page keeps its
+   checkpoint, so unattended passes (30-second alarm, completion re-arm) used
+   to walk straight back into the same broken page forever — the scraping
+   "stops mid-process and never progresses" symptom. After
+   `SCAN_ERROR_STRIKE_LIMIT` (3) fruitless rounds the keyword/city is held
+   back from unattended passes with an explicit panel notice ("Held back: …
+   Press Start to try it again, or Sync now after checking it."). Human
+   Start/Sync intent (`interactive`) always bypasses the hold once; a run
+   that saves reviews or completes normally clears the count. Tab-handshake
+   failures count the same way, stopping "tab never came up" retry loops.
+
+For the **4-pages issue** the defaults were deliberately not changed:
+`parallelTabs` stays 3 (max 6, per-machine) and result pages stay capped at 4 —
+the remedy is operator selection plus enough distinct keywords/cities, now
+documented. For the **two-machine issue**, the diagnosis confirmed there is no
+per-machine job ownership (both machines receive identical `nextJobs`; only
+Apps Script writes serialize), so no code can safely let both machines scan —
+new runbook `docs/ND-ROOM-TWO-MACHINE-SETUP.md` gives the ND-room setup
+(connection code `FUDGE1|…`, per-machine Google-tabs/Result-pages settings
+matching section 3, run Start on ONE machine only, panel meanings/remedies).
+
+Fresh verification: `node tests/smoke.test.js` **129 PASS** (127 previous +
+new "paused trades do not open scans" and "dead pages stand down instead of
+retrying forever") and `node --test tests/backend.test.js` **67 PASS**.
+Release gates `UPLOAD_RELEASED`/`CATALOG_DOWNLOAD_RELEASED` remain false; no
+live scraping, Google crawling, Sheet write or connector deployment was
+performed — both fixes are verified by the offline suites. Live two-machine
+operational acceptance in the ND room remains operator work per the runbook.
+No commit or push occurred.
+
+## Authorized shared-database security rollout — 2026-10-30
+
+With explicit user approval, dashboard verified-access source `20261030155515`
+was applied to the existing shared database as **`20261030155727`**. Twelve
+hosted migration records now exist; old history/data preserved. Five function
+hashes, grants/trigger and unchanged monitoring RPC bodies verified; hosted
+read/role-only verified-staff/missing-identity/anonymous smoke PASS. Unconfirmed
+member and dispatch denials are covered locally, not new hosted account writes.
+Advisors unchanged; no Edge Function needed or deployed. See dashboard
+`docs/DB-DEPLOYMENT-20261030-VERIFIED-ACCESS.md` for evidence and remediation links.
+
+This supersedes the SQL-draft-only wording immediately below. It does not deploy
+publishing/cohort protocols, repair the public Vercel route mismatch, release
+uploads/downloads or deliver to Sheets. Fudge source/gates remain unchanged.
+Dashboard local 805-test/build/typecheck/lint and worker 65-test run passed before
+promotion; promoted-source full revalidation is underway. No account/Sheet/
+browser/customer-content operation, dependency install, commit or push occurred.
+
+## Dashboard local remediation handoff — 2026-10-30
+
+The user selected Fudge as the next repository for the connected flow. Dashboard
+remediation first implements strict worker leases/boolean receipts, a private
+durable monitoring checkpoint with result-only replay and explicit operator
+reconciliation, and a locally tested additive verified-access SQL draft. The
+draft is not deployed; historical migrations are unchanged. A new anonymous
+deployment gate correctly fails the still-missing public `/workspaces` and
+`/verify-email` routes. No hosted rollout is implied.
+
+Dashboard fresh validation: typecheck/lint, **805 tests / 57 files**, production
+build and **12 signed-out local HTTP checks PASS** (owned server stopped).
+Worker **65 tests PASS**. New stdlib-only worker CI job is configured but not run
+on GitHub. Real PostgreSQL contention, filesystem/power-loss, Auth/browser and
+supervised profile recovery acceptance remain outstanding.
+
+Fudge application source and release constants are unchanged in this tranche;
+its earlier 67 backend/127 smoke results were not rerun for this handoff. The
+publisher, actual mapped Sheet delivery, full restore/retention/rights and
+remaining desktop replacements are still separate code/acceptance work. Local
+fixes are not completion of all gaps or authorization for upload/publishing.
+No real source upload, Sheet/platform write, schema/deployment, credentials,
+browser/customer session, dependency installation, commit or push occurred.
+
+## Fresh cross-repository review/testing — 2026-10-30
+
+**Not complete for end-to-end Fudge + ND automation.** Reviewed Fudge commit
+`2c64482` and dashboard `18777bb` from initially clean trees. Fresh Fudge results:
+`node --test tests/backend.test.js` **67 PASS**, `node tests/smoke.test.js`
+**127 PASS**, and `node --check` PASS for all **18 tracked JS/CJS files**.
+Thirteen separate offline contract probes agree across repositories (eight
+ingestion and five catalog cases). Shared master plans and frozen readiness
+checkpoints remain byte-identical; all 44 tracker IDs occur once.
+
+Dashboard fresh typecheck/lint, **782 tests / 55 files** and production build
+**PASS**. Twelve signed-out local production HTTP smoke checks also PASS:
+login 200, protected routes 307 to login, frame denial present. The owned test
+server was stopped; no Auth form submission or business write. Local build
+manifest includes both routes that return 404 on the public deployment.
+Production-dependency audit reports zero
+known vulnerabilities (not a security guarantee). Worker **43 tests PASS**,
+but actual offline preflight exits **1 / BLOCKED** on dependencies/import and
+private connection/adapter files, with zero browser/profile/network operations.
+
+New review probes show production `/workspaces` and `/verify-email` return 404
+despite their presence in current dashboard source; verify deployment parity
+before calling the newest identity/workspace slice live. Anonymous dashboard
+paths redirect to login, which does not prove the pages behind them are present.
+Local database testing also confirms the existing legacy SQL verification gap
+for an already-authenticated unconfirmed user with an assigned membership, not
+a fresh unassigned signup. Mocked worker probes accept expired/malformed lease
+timestamps and malformed completion acknowledgments. Detailed source locations,
+prerequisites and follow-ups are in the dashboard's current implementation-status
+entry. No application fix or production deployment was performed.
+
+Read-only hosted checks confirm 11 migrations, 25 public RLS tables, absent
+publishing/cohort tables, zero inventory/bindings/publications/jobs/intake/outbox
+rows and two active catalog rules. Existing security-advisor warnings remain.
+No publisher, real Sheet outbox deliverer, durable worker result recovery or
+full desktop replacement is delivered. Both Fudge release gates remain false;
+cached catalog rules are never applied to `serviceRules`.
+
+No installed-extension/live Auth, MV3 eviction, real contention, supervised
+customer-profile or Sheet-delivery acceptance was performed. No dependencies,
+hosted schema/data, Sheets, accounts, customer sessions, release constants,
+commits or pushes were changed by this review. Status documentation only.
+
 ## Code-first monitoring handoff — 2026-10-29
 
 Dashboard source now contains explicit customer/date/post-vs-listing cohort
