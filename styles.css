@@ -469,7 +469,7 @@ img { display: block; max-width: 100%; }
   letter-spacing: var(--tr-caps);
   text-transform: uppercase;
 }
-.tag--beta { border-color: var(--ink); background: var(--lime); color: var(--on-lime); letter-spacing: .06em; }
+.tag--version { border-color: var(--ink); background: var(--lime); color: var(--on-lime); letter-spacing: .06em; }
 
 .pill {
   display: inline-flex;

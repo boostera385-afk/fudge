@@ -1,8 +1,8 @@
-# Fudge — Google Review Collector & Sheets Fulfillment
+# Fudge 2.0 — Google Review Collector & Sheets Fulfillment
 
 <p align="center">
   <img src="https://img.shields.io/badge/Chrome%20%2F%20Edge-Manifest%20V3-4285F4?logo=googlechrome&logoColor=white" alt="Chrome / Edge — Manifest V3">
-  <img src="https://img.shields.io/badge/version-0.29.1-brightgreen" alt="Version 0.29.1">
+  <img src="https://img.shields.io/badge/version-2.0-brightgreen" alt="Version 2.0">
   <img src="https://img.shields.io/badge/language-JavaScript-f7df1e?logo=javascript&logoColor=black" alt="JavaScript">
   <img src="https://img.shields.io/badge/dependencies-none-success" alt="Zero dependencies">
   <img src="https://img.shields.io/badge/backend-Google%20Sheets%20%2B%20Apps%20Script-34A853?logo=googlesheets&logoColor=white" alt="Google Sheets + Apps Script">
@@ -409,9 +409,9 @@ Fudge automates browsing of Google (Maps/Search) and honors rate-limit pages by 
 
 ## 🧾 Versioning & tags
 
-- Extension version lives in `manifest.json` — current: **`0.29.1`**.
+- Extension version lives in `manifest.json` — current: **`2.0`**.
 - Connector template version lives in `apps-script.gs` as `FUDGE_CONNECTOR_VERSION`; the extension's expectation in `sheets.js` as `REQUIRED_CONNECTOR_VERSION`.
-- Git releases are tagged `v<major>.<minor>.<patch>` matching the manifest (e.g. [`v0.29.1`](https://github.com/boostera385-afk/fudge/releases)), so a connected Sheet's connector version can always be diffed against the template it came from.
+- Git releases are tagged `v<version>` matching the manifest (e.g. [`v2.0`](https://github.com/boostera385-afk/fudge/releases)), so a connected Sheet's connector version can always be diffed against the template it came from.
 
 ## 📄 License
 
