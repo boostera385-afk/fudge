@@ -1080,8 +1080,16 @@ async function testKeywordsReceiveDistributedCities() {
   const cityRows = [["Dallas, TX"], ["Houston, TX"], ["Austin, TX"]];
   const first = await runSheetsSync({ structureRows, reviewRows: [], cityRows });
   const second = await runSheetsSync({ structureRows, reviewRows: [], cityRows });
-  assert.deepEqual(Array.from(first.result.nextJobs, (job) => job.city), ["Austin, TX", "Houston, TX"], "different keywords should be distributed across the city list");
-  assert.deepEqual(Array.from(second.result.nextJobs, (job) => job.city), ["Austin, TX", "Houston, TX"], "the shuffled choice must survive a restart");
+  assert.deepEqual(Array.from(first.result.nextJobs.slice(0, 2), (job) => job.city), ["Austin, TX", "Houston, TX"], "different keywords should be distributed across the city list");
+  assert.deepEqual(Array.from(second.result.nextJobs.slice(0, 2), (job) => job.city), ["Austin, TX", "Houston, TX"], "the shuffled choice must survive a restart");
+  // Two keywords and three tabs: the spare tab takes the first keyword in another
+  // city, and that keyword's target is split between its two tabs.
+  const spare = first.result.nextJobs[2];
+  assert.ok(spare, "a spare tab must not sit idle while a keyword is short");
+  assert.equal(spare.serviceKeyword, first.result.nextJobs[0].serviceKeyword);
+  assert.notEqual(spare.city, first.result.nextJobs[0].city, "the spare tab searches a different city");
+  assert.equal(spare.targetCount, first.result.nextJobs[0].targetCount, "tabs sharing a keyword share its target");
+  assert.ok(first.result.nextJobs[1].targetCount > spare.targetCount, "a keyword with one tab keeps its whole target");
 }
 
 // An exhausted keyword/city combination is never searched again.
@@ -1313,8 +1321,9 @@ async function testPausedTradesDoNotOpenScans() {
   const cityRows = [["Dallas, TX"], ["Houston, TX"]];
   const serviceRows = [["flooring installation"], ["Gutter cleaning", "Paused"]];
   const { result } = await runSheetsSync({ structureRows, reviewRows: [], cityRows, serviceRows });
-  assert.equal(result.nextJobs.length, 1, "only the active trade may earn a scan");
-  assert.equal(result.nextJobs[0].serviceKeyword, "flooring installation", "the paused trade must not have a job opened for it");
+  assert.ok(result.nextJobs.length >= 1, "the active trade still earns a scan");
+  assert.ok(result.nextJobs.every((job) => job.serviceKeyword === "flooring installation"), "the paused trade must not have a job opened for it");
+  assert.equal(new Set(result.nextJobs.map((job) => job.city)).size, result.nextJobs.length, "spare tabs for one keyword search different cities");
   assert.deepEqual([...result.pausedEverywhere], ["Gutter cleaning"], "the panel must be able to name the paused trade that keeps its row waiting");
 }
 

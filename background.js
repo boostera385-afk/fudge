@@ -330,6 +330,9 @@ async function startAutomaticJob(spec, { activate = false, pageLimit = 4 } = {})
   const tab = await chrome.tabs.create({ url, active: activate });
   try {
     await notePendingRunnerTab(tab.id);
+    // Memory Saver discards background tabs it thinks are idle. A discarded runner
+    // loses its scan mid-page, so these tabs opt out for as long as they live.
+    await Promise.resolve().then(() => chrome.tabs.update(tab.id, { autoDiscardable: false })).catch(() => {});
     const { sheetsStatus = null } = await getLocal({ sheetsStatus: null });
     await setLocal({ sheetsStatus: { ...(sheetsStatus || {}), stage: "Opening Google for " + spec.query, updatedAt: new Date().toISOString() } });
     await waitForTab(tab.id);
@@ -529,6 +532,13 @@ chrome.tabs.onRemoved.addListener((tabId) => {
 });
 
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
+  // Pacing for hidden runner tabs; see sleep() in content.js.
+  if (message?.type === "FUDGE_SLEEP") {
+    new Promise((resolve) => setTimeout(resolve, Math.min(5000, Math.max(0, Number(message.ms) || 0))))
+      .then(() => sendResponse({ ok: true }))
+      .catch((error) => sendResponse({ ok: false, error: error.message }));
+    return true;
+  }
   if (message?.type === "OPEN_DASHBOARD") {
     chrome.tabs.create({ url: chrome.runtime.getURL("dashboard.html") });
     return;

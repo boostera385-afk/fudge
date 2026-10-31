@@ -6,7 +6,18 @@
   const MAX_RESULT_PAGES = 4;
   const safePageLimit = (value) => Math.min(MAX_RESULT_PAGES, Math.max(1, Number(value) || MAX_RESULT_PAGES));
   const expandedReviewControls = new WeakSet();
-  const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+  // Runner tabs work in the background, where Chrome stretches a page's timers to
+  // one a second and, after five hidden minutes, to one a minute. Every scroll step
+  // below waits on sleep(), so a hidden runner slowed to a crawl and then looked
+  // stopped until someone clicked its tab. A reply from the service worker is an
+  // event, not a page timer, so it arrives on time whether the tab is seen or not.
+  const timerSleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+  const sleep = async (ms) => {
+    if (document.visibilityState !== "hidden") return timerSleep(ms);
+    // Worker unavailable: the page timer still waits.
+    const reply = await chrome.runtime.sendMessage({ type: "FUDGE_SLEEP", ms }).catch(() => null);
+    if (!reply?.ok) await timerSleep(ms);
+  };
   // How long to keep scrolling a business whose review topics did not match.
   const UNMATCHED_TOPIC_BUDGET_MS = 4000;
   // How long to insist on photo-backed reviews before accepting text-only ones.

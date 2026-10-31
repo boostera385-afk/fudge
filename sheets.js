@@ -6,7 +6,7 @@ const SheetsService = (() => {
   const SERVICE_HEADERS = ["Service Keyword", "Status", "Reviews Collected", "Notes", "Search Term", "Business Name Keywords", "Review Keywords", "Required Review Keywords", "Google Filter Keywords", "Exclude Keywords", "Service Family", "Subcategory", "Topic Filter Required", "Collect Family Reviews", "Rewrite Service Phrase", "Equivalent Service Phrases"];
   // The connector lives inside the user's spreadsheet, so it can be older than the
   // extension. Anything above version 1 knows about the Cities and Services tabs.
-  const REQUIRED_CONNECTOR_VERSION = 40;
+  const REQUIRED_CONNECTOR_VERSION = 41;
   // The selected tab limit controls how many distinct keywords the Sheet returns.
   const DEFAULT_PARALLEL_JOBS = 3;
   const MAX_PARALLEL_JOBS = 6;
@@ -842,7 +842,7 @@ const SheetsService = (() => {
       // rather than rolling another random choice. Once that combination is
       // exhausted, the next city in that keyword's shuffled order takes over.
       // A city written on the Structure row still wins.
-      const resolveTarget = (deficit) => {
+      const resolveTarget = (deficit, taken = new Set()) => {
         if (deficit.city) {
           const key = searchKey(deficit.service, deficit.city, deficit.mode);
           return isExhausted(key) ? null : { name: deficit.city, key };
@@ -854,7 +854,7 @@ const SheetsService = (() => {
         const available = cities.map((city) => {
           const key = searchKey(deficit.service, city.name, deficit.mode);
           return { name: city.name, key, progress: progressByKey.get(key)?.row || null };
-        }).filter((candidate) => !isExhausted(candidate.key));
+        }).filter((candidate) => !isExhausted(candidate.key) && !taken.has(candidate.key));
         // Cities take turns. A city used to stay pinned to its keyword until it was
         // marked exhausted, and exhaustion is only recorded when a scan runs out of
         // results or hits the page cap. Every other ending — target reached,
@@ -916,6 +916,32 @@ const SheetsService = (() => {
         nextJobs.push({ auto: true, searchKey: target.key, serviceKeyword: deficit.service, city: target.name, reviewMode: deficit.mode, targetCount: deficit.amount, query: Fudge.buildSearchQuery(deficit.service, target.name), currentPage: Math.max(1, Number(progress[4]) || 1), businessIndex: Math.max(0, Number(progress[5]) || 0), visitedPlaceIds: clean(progress[7]).split("|").filter(Boolean) });
         if (nextJobs.length >= jobLimit) break;
       }
+      // Fewer short keywords than tabs used to leave tabs unopened: four tabs set,
+      // two keywords waiting, two tabs. A spare tab now takes one of those keywords
+      // in another city, and the keyword's target is shared between its tabs so
+      // together they collect what is needed rather than each collecting all of it.
+      const takenKeys = new Set(nextJobs.map((job) => job.searchKey));
+      let addedSpare = true;
+      while (nextJobs.length < jobLimit && addedSpare) {
+        addedSpare = false;
+        for (const deficit of ordered) {
+          if (nextJobs.length >= jobLimit) break;
+          if (deficit.amount <= 0 || deficit.city || !cities.length) continue;
+          const keywordKey = Fudge.normalize(deficit.service);
+          if (!claimedKeywords.has(keywordKey)) continue;
+          const sharing = nextJobs.filter((job) => Fudge.normalize(job.serviceKeyword) === keywordKey).length;
+          if (sharing >= deficit.amount) continue;
+          const target = resolveTarget(deficit, takenKeys);
+          if (!target) continue;
+          const progress = progressByKey.get(target.key)?.row || [];
+          takenKeys.add(target.key);
+          addedSpare = true;
+          nextJobs.push({ auto: true, searchKey: target.key, serviceKeyword: deficit.service, city: target.name, reviewMode: deficit.mode, targetCount: deficit.amount, query: Fudge.buildSearchQuery(deficit.service, target.name), currentPage: Math.max(1, Number(progress[4]) || 1), businessIndex: Math.max(0, Number(progress[5]) || 0), visitedPlaceIds: clean(progress[7]).split("|").filter(Boolean) });
+        }
+      }
+      const tabsPerKeyword = new Map();
+      nextJobs.forEach((job) => tabsPerKeyword.set(Fudge.normalize(job.serviceKeyword), (tabsPerKeyword.get(Fudge.normalize(job.serviceKeyword)) || 0) + 1));
+      nextJobs.forEach((job) => { job.targetCount = Math.ceil(job.targetCount / tabsPerKeyword.get(Fudge.normalize(job.serviceKeyword))); });
       const nextJob = nextJobs[0] || null;
       // Self-heal the Sheet's own automation. If its triggers are missing — never
       // installed, deleted, or disabled by Google after a run of failures — try
