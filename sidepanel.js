@@ -461,13 +461,21 @@ elements.collect.addEventListener("click", async () => {
 elements.stop.addEventListener("click", async () => {
   elements.stop.disabled = true;
   setLabel(elements.stop, "Stopping…");
-  const result = await chrome.runtime.sendMessage({ type: "STOP_SCAN_JOB" });
-  elements.stop.disabled = false;
-  if (result?.runState) runState = result.runState;
-  if (!result?.ok) {
+  let result = null;
+  try {
+    result = await chrome.runtime.sendMessage({ type: "STOP_SCAN_JOB" });
+  } catch (error) {
+    // The worker can be asleep or the channel closed. The button must not stay
+    // on "Stopping…" forever; the next interaction revives the worker and the
+    // state is written even if this one message was lost.
+    showToast(error.message || "Stop did not answer. Press Stop again if the panel still shows a scan.", "error");
+  } finally {
+    elements.stop.disabled = false;
     setLabel(elements.stop, "Stop collecting");
-    return showToast(result?.error || "Could not stop the scan.", "error");
   }
+  if (!result) return;
+  if (result?.runState) runState = result.runState;
+  if (!result?.ok) return showToast(result?.error || "Could not stop the scan.", "error");
   await render();
   showToast("Stopped. Nothing will open until you press Start. Collected reviews stay saved.");
 });

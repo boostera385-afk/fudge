@@ -2396,6 +2396,41 @@ function testConnectorRotatesNamesAlignsServicesAndVariesCtas() {
   assert.deepEqual(Array.from(vm.runInContext("FUDGE_TABS.Names", context)), ["Name", "Last Used"]);
 }
 
+function testLiveRewriterRegressions() {
+  const context = { console };
+  vm.createContext(context);
+  vm.runInContext(fs.readFileSync(path.join(root, "apps-script.gs"), "utf8"), context);
+  // Live REQ-818/REQ-9/REQ-39: "Moving is always stressful" and
+  // "Junk Removal was fantastic" used to be read as crew names, so every
+  // "moving"/"removal" in the rewrite became "he" ("He Service is always
+  // stressful", "same-day Junk he").
+  assert.deepEqual(Array.from(context.writerOriginalPersonNames_("Moving is always stressful.", "Moving Service")), [], "a service word before 'is' must not be read as a person when the row serves that service");
+  assert.deepEqual(Array.from(context.writerOriginalPersonNames_("Junk Removal was fantastic.")), [], "the service stoplist must reject 'Removal' before 'was'");
+  assert.deepEqual(Array.from(context.writerOriginalPersonNames_("Sean and Nick were great. Will is a wonderful person.", "Moving Service")), ["Will"], "genuine capitalized names must still be detected");
+  // Live REQ-22: "Exterior Exterior Exterior Painting". Replacing short
+  // equivalents inside the already-converted phrase glued on extra copies.
+  const once = context.writerAlignServiceTerms_("They painted outside.", "Exterior Painting", ["outside painting", "outside", "painting", "exterior"]);
+  assert.equal(once, "They painted Exterior Painting.", "conversion must stay single");
+  assert.equal(context.writerAlignServiceTerms_(once, "Exterior Painting", ["outside painting", "outside", "painting", "exterior"]), once, "a second alignment pass must not duplicate the phrase");
+  // Live REQ-818: "The work involved he Service. The work involved Moving
+  // Service." — the deterministic repair ran again on already-repaired text.
+  const firstAppend = context.writerRepairMeaning_("They were friendly.", "They were friendly.", "Garage Door Replacement", []);
+  assert.ok(firstAppend.includes("The work involved Garage Door Replacement."), "one 'The work involved' sentence is expected");
+  const secondAppend = context.writerRepairMeaning_(firstAppend, "They were friendly.", "Garage Door Replacement", []);
+  assert.equal((secondAppend.match(/The work involved/g) || []).length, 1, "a repaired draft passing through repair again must not gain a second appended sentence");
+  // Live REQ-24: "I highly recommend him and his team for Junk Removal for
+  // Junk he." — the recommendation insert also doubled on a second pass.
+  const firstRecommend = context.writerRepairMeaning_("They handled the work. I highly recommend them.", "They handled the work.", "Sofa Cleaning", []);
+  assert.ok(/for Sofa Cleaning\b/.test(firstRecommend), "the recommendation carries the service once");
+  const secondRecommend = context.writerRepairMeaning_(firstRecommend, "They handled the work.", "Sofa Cleaning", []);
+  assert.equal((secondRecommend.match(/for Sofa Cleaning/g) || []).length, 1, "the recommendation insert must not double on a later pass");
+  // Live REQ-7: the crew member was named Will and the modal "will" was
+  // replaced too: "We he absolutely use his services again. TY he!".
+  const cleanedWill = context.writerCleanKnownIdentities_("We will absolutely use his services again. Will was wonderful.", [], ["Will"], [], "James");
+  assert.equal(cleanedWill, "We will absolutely use his services again. James was wonderful.", "only the crew member Will may be replaced, never the modal 'will'");
+  assert.deepEqual(Array.from(context.writerOriginalNameLeaks_("Will is a wonderful person.", "We will absolutely use his services again.", "James", "")), [], "the modal 'will' must not be reported as a leaked name");
+}
+
 function testEmptyWriterSettingsDoNotBlockPropertySaving() {
   const values = { FUDGE_OPENAI_API_KEY: "test-key", FUDGE_WRITER_PHONE: "", FUDGE_WRITER_NAMES: "" };
   const context = { PropertiesService: { getScriptProperties: () => ({
@@ -4093,6 +4128,7 @@ function testTransientRephraseFailureIsRetriedLater() {
     ["connector removes weather locally", testConnectorRemovesWeatherLocally],
     ["connector cleans an original name and finds other organizations", testConnectorCleansOriginalNameAndFindsOtherOrganizations],
     ["connector rotates names, aligns services, and varies CTAs", testConnectorRotatesNamesAlignsServicesAndVariesCtas],
+    ["live rewriter regressions", testLiveRewriterRegressions],
     ["empty writer settings do not block property saving", testEmptyWriterSettingsDoNotBlockPropertySaving],
     ["connector key setup from Sheet menu", testConnectorKeyCanBeSetFromSheetMenu],
     ["Sheet-only queue matching", testSheetOnlyQueueMatching],
