@@ -470,6 +470,9 @@ img { display: block; max-width: 100%; }
   text-transform: uppercase;
 }
 .tag--version { border-color: var(--ink); background: var(--lime); color: var(--on-lime); letter-spacing: .06em; }
+.release-info { margin: 12px 20px; color: var(--ink); font-size: 11px; overflow-wrap: anywhere; }
+.release-info summary { cursor: pointer; }
+.release-info p { margin: 8px 0; }
 
 .pill {
   display: inline-flex;

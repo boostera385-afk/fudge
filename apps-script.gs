@@ -7,7 +7,7 @@ const FUDGE_SECRET = "__FUDGE_SECRET__";
 // Bumped whenever this connector's required behavior changes. Fudge reads it from
 // every response so it can tell you when the copy inside your Sheet is older than
 // the extension expects, instead of failing with an unhelpful error.
-const FUDGE_CONNECTOR_VERSION = 42;
+const FUDGE_CONNECTOR_VERSION = 43;
 const FUDGE_WRITER_PROMPT_VERSION = 23;
 const FUDGE_DEFAULT_MALE_NAMES = ["James", "Michael", "Daniel", "David", "Matthew", "Ryan", "Jason", "Andrew", "Brian", "Kevin"];
 const FUDGE_CTA_TEMPLATE_COUNT = 12;
@@ -39,6 +39,8 @@ function onOpen() {
     .addItem("Rephrase now", "fudgeRephraseNow")
     .addItem("Fill rows now", "fudgeFillRowsNow")
     .addItem("Set OpenAI API key", "fudgeSetOpenAiKey")
+    .addItem("Set rephrasing model", "fudgeSetWriterModel")
+    .addItem("Check model access (no generation)", "fudgeCheckWriterAccess")
     .addItem("Install automatic rephrasing", "fudgeInstallAutomation")
     .addItem("Test rephrasing", "fudgeTestRephrasing")
     .addItem("Rephrasing status", "fudgeShowStatus")
@@ -83,11 +85,10 @@ function fudgeTestRephrasing() {
   const job = writerJob_(review, Object.assign({}, settings, { phone: String(sample[11] || "").trim(), requirePhone: Boolean(String(sample[11] || "").trim()) }));
   let response;
   try { response = UrlFetchApp.fetch("https://api.openai.com/v1/chat/completions", writerFetchOptions_(job)); }
-  catch (error) { ui.alert("The request to OpenAI failed before it was answered:\n\n" + String(error && error.message || error)); return; }
+  catch (_error) { ui.alert("The request to OpenAI could not finish. Check network access and the saved key; private error details are withheld."); return; }
   const status = response.getResponseCode();
-  const body = String(response.getContentText() || "").slice(0, 900);
   if (status < 200 || status >= 300) {
-    ui.alert("OpenAI refused the request with status " + status + ", using model \"" + writerModel_() + "\".\n\n" + body
+    ui.alert("OpenAI refused the request with status " + status + ", using model \"" + writerModel_() + "\".\n\n" + writerResponseDetail_(response)
       + "\n\nIf the model name is wrong for this key, set a different one with the script property FUDGE_OPENAI_MODEL.");
     return;
   }
@@ -102,7 +103,7 @@ function fudgeShowStatus() {
   const lines = [
     "Connector version: " + FUDGE_CONNECTOR_VERSION,
     "OpenAI key saved: " + (state.writerConfigured ? "yes" : "no"),
-    "Model: " + state.model,
+    "Model: " + state.model + " (configured; access is not established by this status)",
     "One-minute queue trigger: " + (state.queueTrigger ? "installed" : "MISSING"),
     "Rephrasing trigger: " + (state.rephraseTrigger ? "installed" : "MISSING"),
     "Edit trigger: " + (state.editTrigger ? "installed" : "MISSING"),
@@ -123,6 +124,53 @@ function fudgeSetOpenAiKey() {
   if (!key) { ui.alert("No key was entered. Nothing was saved."); return; }
   PropertiesService.getScriptProperties().setProperty("FUDGE_OPENAI_API_KEY", key);
   ui.alert("OpenAI API key saved. Fudge will use it for automatic rephrasing.");
+}
+
+function fudgeSetWriterModel() {
+  const ui = SpreadsheetApp.getUi();
+  const answer = ui.prompt("Rephrasing model", "Enter an exact OpenAI model ID available to your key, not an API key. Current: " + writerModel_() + ". Check access from the Fudge menu afterwards.", ui.ButtonSet.OK_CANCEL);
+  if (answer.getSelectedButton() !== ui.Button.OK) return;
+  const model = String(answer.getResponseText() || "").trim();
+  if (!/^[A-Za-z0-9][A-Za-z0-9_.:-]{0,199}$/.test(model) || /^(?:sk-|sb_secret_|sbp_)/i.test(model)) {
+    ui.alert("Enter a model ID, not a key, URL or blank value. No setting was changed.");
+    return;
+  }
+  PropertiesService.getScriptProperties().setProperty("FUDGE_OPENAI_MODEL", model);
+  ui.alert("Model saved: " + model + ". Use Check model access, then Test rephrasing. This did not rewrite any Sheet row.");
+}
+
+// Read-only provider check: sends no review text, spends no generation tokens,
+// changes no Sheet/Script property, and does not claim generation compatibility.
+function writerCheckAccess_() {
+  const key = writerReadProperty_("FUDGE_OPENAI_API_KEY");
+  const model = writerModel_();
+  if (!key) return { ok: false, message: "No OpenAI API key is saved. Use Fudge → Set OpenAI API key." };
+  if (!/^[A-Za-z0-9][A-Za-z0-9_.:-]{0,199}$/.test(model) || /^(?:sk-|sb_secret_|sbp_)/i.test(model)) {
+    return { ok: false, message: "The configured model is not a valid model ID. Use Fudge → Set rephrasing model." };
+  }
+  let response;
+  try {
+    response = UrlFetchApp.fetch("https://api.openai.com/v1/models/" + encodeURIComponent(model), {
+      method: "get", headers: { Authorization: "Bearer " + key }, muteHttpExceptions: true
+    });
+  } catch (_error) {
+    return { ok: false, message: "Model access could not be checked. Check network access; private error details are withheld." };
+  }
+  const status = response.getResponseCode();
+  if (status < 200 || status >= 300) return {
+    ok: false, message: "Model access check returned HTTP " + status + ". " + (status === 401 || status === 403
+      ? "Check the saved key and its model-read permissions." : status === 404
+        ? "This model ID was not found or is unavailable to this key. Set an available model."
+        : "The provider could not confirm access. Try again later.")
+  };
+  let body;
+  try { body = JSON.parse(response.getContentText()); } catch (_error) { body = null; }
+  if (!body || body.object !== "model" || body.id !== model) return { ok: false, message: "The provider did not confirm the exact configured model." };
+  return { ok: true, message: "Model \"" + model + "\" is readable with the saved key. No review text was sent and no row was changed. This does not prove generation permissions, quota, parameters or rewrite quality; use Test rephrasing for that." };
+}
+
+function fudgeCheckWriterAccess() {
+  SpreadsheetApp.getUi().alert(writerCheckAccess_().message);
 }
 
 function doPost(e) {
@@ -1110,9 +1158,17 @@ function writerResponseDetail_(response) {
   try {
     const parsed = JSON.parse(body);
     const message = parsed && parsed.error && parsed.error.message;
-    if (message) return String(message).slice(0, 220);
+    if (message) return writerSafeError_(message).slice(0, 220);
   } catch (_error) { /* fall through to the raw body */ }
-  return body.replace(/\s+/g, " ").trim().slice(0, 220);
+  // Non-JSON provider bodies may contain debug data; never expose them.
+  return "Private provider response details are withheld.";
+}
+
+function writerSafeError_(value) {
+  let message = String(value && value.message || value || "Unknown writer error");
+  const key = writerReadProperty_("FUDGE_OPENAI_API_KEY");
+  if (key) message = message.split(key).join("[redacted key]");
+  return message.replace(/\b(?:sk-(?:proj-)?[A-Za-z0-9_-]+|sb_secret_[A-Za-z0-9_-]+|sbp_[A-Za-z0-9]+)\b/g, "[redacted key]").slice(0, 300);
 }
 
 function writerEvaluateResponse_(response, job) {
@@ -1182,7 +1238,7 @@ function writerFallbackResult_(job, candidate, reason) {
   copy = writerEnsureSingleName_(copy, job.replacementName);
   let phone = "";
   try { phone = writerPhone_(copy, job.settings.phone); } catch (_error) { phone = ""; }
-  console.warn("Fudge writer used local fallback: " + String(reason || "validation did not pass"));
+  console.warn("Fudge writer used local fallback: " + writerSafeError_(reason || "validation did not pass"));
   return { text: copy, phone: phone, cta: job.requiredCta, fallback: true, warning: String(reason || "") };
 }
 
@@ -1315,7 +1371,7 @@ function writerFailureNote_(source, error, attempts) {
   const delays = [60000, 300000, 1800000];
   return FUDGE_REWRITE_FAILURE_PREFIX + JSON.stringify({
     source: source,
-    error: String(error || "Unknown writer error").slice(0, 300),
+    error: writerSafeError_(error),
     attempts: attempts,
     connectorVersion: FUDGE_CONNECTOR_VERSION,
     retryAt: attempts >= 3 ? 0 : Date.now() + delays[Math.min(Math.max(0, attempts - 1), delays.length - 1)]
@@ -1338,7 +1394,7 @@ function writerRecordStructureFailure_(target, error, retryable, text) {
   target.cell.setValue(safeCell_(visible));
   target.cell.setNote(writerFailureNote_(target.source, error, attempts));
   writerSaveProperties_({
-    FUDGE_LAST_WRITER_ERROR: String(error || "Unknown writer error").slice(0, 300),
+    FUDGE_LAST_WRITER_ERROR: writerSafeError_(error),
     FUDGE_LAST_WRITER_ERROR_AT: new Date().toISOString()
   });
 }
@@ -1416,7 +1472,7 @@ function processStructureRewrites_(sheet, startRow, rowCount, limit) {
       writerRecordStructureFailure_(target, error, true);
     });
     SpreadsheetApp.flush();
-    console.error("Fudge Structure writer: " + String(error && error.message || error));
+    console.error("Fudge Structure writer: " + writerSafeError_(error));
     return 0;
   }
   results.forEach(function (outcome, index) {
@@ -1434,7 +1490,7 @@ function processStructureRewrites_(sheet, startRow, rowCount, limit) {
     const fallback = usedFallback ? outcome.result : (outcome && outcome.fallback) || null;
     const error = (usedFallback ? outcome.result.warning : outcome && outcome.error) || "Unknown writer error";
     writerRecordStructureFailure_(target, error, outcome && outcome.retryable, fallback ? fallback.text : (outcome && outcome.copy) || "");
-    console.error("Fudge Structure writer row " + target.rowNumber + ": " + String(error));
+    console.error("Fudge Structure writer row " + target.rowNumber + ": " + writerSafeError_(error));
   });
   if (targets.length) {
     SpreadsheetApp.flush();

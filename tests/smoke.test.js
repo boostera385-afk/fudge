@@ -178,14 +178,14 @@ const SECRET = "fudge-secret-0123456789-abcdefghij";
 
 // Stands in for the deployed Apps Script web app: one POST endpoint that
 // switches on `action`, exactly as apps-script.gs does.
-function connectorStub({ structureRows = [], reviewRows = [], progressRows = [], cityRows = [], serviceRows = [], uploadResult = { files: [], errors: [] }, onRequest = null, appendStartRow = 0, calls }) {
+function connectorStub({ structureRows = [], reviewRows = [], progressRows = [], cityRows = [], serviceRows = [], uploadResult = { files: [], errors: [] }, onRequest = null, appendStartRow = 0, reportedVersion = null, calls }) {
   return async (url, options = {}) => {
     assert.equal(url, EXEC_URL);
     const request = JSON.parse(options.body);
     assert.equal(request.secret, SECRET, "every connector call must carry the shared secret");
     calls.push(request);
     if (onRequest) await onRequest(request);
-    const reply = (value) => ({ ok: true, status: 200, text: async () => JSON.stringify(value) });
+    const reply = (value) => ({ ok: true, status: 200, text: async () => JSON.stringify(reportedVersion === null ? value : { connectorVersion: reportedVersion, ...value }) });
     switch (request.action) {
       case "setup":
         return reply({ ok: true, spreadsheetId: "sheet-1", spreadsheetUrl: "https://docs.google.com/spreadsheets/d/sheet-1" });
@@ -271,6 +271,36 @@ async function testConnectorSetup() {
   await service.disconnect();
   assert.equal(store.data.appsScriptUrl, undefined);
   assert.equal(store.data.runState, "stopped");
+}
+
+async function testConnectorVersionObservationSurvivesRestartWithoutCrossingSheets() {
+  const store = storage();
+  const service = sheetsContext(store, connectorStub({ calls: [], reportedVersion: CURRENT_CONNECTOR_VERSION })).__SheetsService;
+  await service.configure(EXEC_URL, SECRET);
+  const seen = await service.status();
+  assert.equal(seen.expectedConnectorVersion, CURRENT_CONNECTOR_VERSION);
+  assert.equal(seen.connectorVersion, CURRENT_CONNECTOR_VERSION);
+  assert.ok(Number.isFinite(Date.parse(seen.connectorObservedAt)));
+  const restarted = sheetsContext(store, connectorStub({ calls: [] })).__SheetsService;
+  assert.equal((await restarted.status()).connectorVersion, CURRENT_CONNECTOR_VERSION);
+  await store.local.set({ appsScriptUrl: "https://script.google.com/macros/s/another-fixture/exec" });
+  assert.equal((await restarted.status()).connectorVersion, null, "a different endpoint must not inherit this Sheet's version");
+  await restarted.disconnect();
+  assert.equal((await restarted.status()).connectorVersion, null);
+  assert.equal(store.data.sheetsConnectorObservation, undefined);
+}
+
+async function testOptionalVersionMetadataFailureDoesNotFailAConnection() {
+  const store = storage();
+  const save = store.local.set;
+  store.local.set = async (values, callback) => {
+    if (Object.hasOwn(values, "sheetsConnectorObservation")) throw new Error("optional diagnostic storage unavailable");
+    return save(values, callback);
+  };
+  const service = sheetsContext(store, connectorStub({ calls: [], reportedVersion: CURRENT_CONNECTOR_VERSION })).__SheetsService;
+  const database = await service.configure(EXEC_URL, SECRET);
+  assert.equal(database.spreadsheetId, "sheet-1");
+  assert.equal((await service.status()).connectionReady, true);
 }
 
 // A deployment baked earlier by this same installation answers to a secret it still
@@ -4048,6 +4078,8 @@ function testTransientRephraseFailureIsRetriedLater() {
     ["content duplicate identity", testContentDuplicateIdentity],
     ["duplicate merge keeps Drive alignment", testDuplicateMergeKeepsDrivePhotoAlignment],
     ["connector setup", testConnectorSetup],
+    ["connector version observations remain scoped after restart", testConnectorVersionObservationSurvivesRestartWithoutCrossingSheets],
+    ["optional version metadata never fails the connection", testOptionalVersionMetadataFailureDoesNotFailAConnection],
     ["connecting recovers an older secret", testConnectingRecoversAnOlderSecret],
     ["connector secret survives disconnect", testConnectorSecretSurvivesDisconnect],
     ["connector authorization error is actionable", testConnectorAuthorizationErrorIsActionable],

@@ -4,6 +4,7 @@ const icon = (name) => `<svg class="icon icon--sm"><use href="#i-${name}" /></sv
 const setLabel = (button, text) => { (button.querySelector("[data-label]") || button).textContent = text; };
 let connectorCode = "";
 let connectorSecret = "";
+let setupGeneration = 0;
 let toastTimer;
 
 function showToast(message, variant = "info") {
@@ -17,27 +18,46 @@ function showToast(message, variant = "info") {
 function renderConnection(database) {
   const card = $("#connectionCard");
   card.dataset.state = database ? "connected" : "idle";
-  $("#connectionTitle").textContent = database ? "Fudge database connected" : "Not connected";
-  $("#connectionDetail").textContent = database ? "Automatic Sheets fulfillment and public Drive image links are ready." : "The connector will create Fudge tabs and a Fudge Reviews folder in your Drive.";
+  $("#connectionTitle").textContent = database ? "Fudge Sheet connection saved" : "Not connected";
+  $("#connectionDetail").textContent = database ? "Saved setup found. Use Sync now to check it. Collection stays stopped until Start collecting; Drive uploads can create public image links." : "The connector will create Fudge tabs and a Fudge Reviews folder in your Drive.";
   $("#disconnectButton").hidden = !database;
   $("#copyConnectionButton").hidden = !database;
 }
 
 async function loadSetup() {
+  const generation = ++setupGeneration;
+  connectorCode = "";
+  $("#copyScript").disabled = true;
+  $("#connectButton").disabled = true;
+  $("#scriptPreview").textContent = "Preparing your protected connector…";
   const result = await chrome.runtime.sendMessage({ type: "GET_SCRIPT_SETUP" });
-  if (!result.ok) throw new Error(result.error);
+  if (!result?.ok) throw new Error(result?.error || "Setup could not be loaded. Reopen this page and try again.");
+  if (typeof result.appsScriptSecret !== "string" || result.appsScriptSecret.length < 24) throw new Error("Protected connector is not ready. Reopen setup and try again.");
+  const response = await fetch(chrome.runtime.getURL("apps-script.gs"));
+  if (!response.ok) throw new Error("Connector file could not load. Reload the extension, then reopen setup.");
+  const template = await response.text();
+  const version = template.match(/const FUDGE_CONNECTOR_VERSION = (\d+);/);
+  const declaration = 'const FUDGE_SECRET = "__FUDGE_SECRET__";';
+  if (!version || !template.includes(declaration)) throw new Error("Connector file is incomplete. Reload the extension, then reopen setup.");
+  if (generation !== setupGeneration) return;
   connectorSecret = result.appsScriptSecret;
-  const template = await fetch(chrome.runtime.getURL("apps-script.gs")).then((response) => response.text());
-  connectorCode = template.replaceAll("__FUDGE_SECRET__", connectorSecret.replaceAll("\\", "\\\\").replaceAll('"', '\\"'));
-  $("#scriptPreview").textContent = `${connectorCode.split("\n").slice(0, 5).join("\n")}\n\n… complete connector ready to copy`;
+  connectorCode = template.replace(declaration, () => `const FUDGE_SECRET = ${JSON.stringify(connectorSecret)};`);
+  $("#scriptPreview").textContent = `Protected connector v${version[1]} ready to copy. The private secret is included in the copy, not shown here.`;
+  $("#copyScript").disabled = false;
+  $("#connectButton").disabled = false;
   $("#webAppUrl").value = result.appsScriptUrl || "";
   const status = await chrome.runtime.sendMessage({ type: "GET_SHEETS_STATUS" }).catch(() => null);
-  renderConnection(status?.ok && status.connectionReady ? result.sheetsDatabase : null);
+  if (generation === setupGeneration) renderConnection(status?.ok && status.connectionReady ? result.sheetsDatabase : null);
 }
 
 $("#copyScript").addEventListener("click", async () => {
-  await navigator.clipboard.writeText(connectorCode);
-  showToast("Complete protected connector copied. Paste it into Apps Script.");
+  try {
+    if (!connectorCode) throw new Error("Connector is not ready. Wait for it to load or reopen setup.");
+    await navigator.clipboard.writeText(connectorCode);
+    showToast("Protected connector copied. Keep it private; paste it into Apps Script and deploy a New version.");
+  } catch (_error) {
+    showToast(connectorCode ? "Could not copy the connector. Allow clipboard access and try again." : "Connector is not ready. Wait for it to load or reopen setup.", "error");
+  }
 });
 
 $("#connectButton").addEventListener("click", async () => {
@@ -46,14 +66,23 @@ $("#connectButton").addEventListener("click", async () => {
   button.disabled = true;
   setLabel(button, "Testing connector…");
   try {
+    if (!connectorCode) throw new Error("Protected connector is not ready. Reopen setup and try again.");
     const result = await chrome.runtime.sendMessage({ type: "SAVE_SCRIPT_SETUP", url, secret: connectorSecret });
     if (!result.ok) throw new Error(result.error);
     renderConnection(result.database);
-    showToast("Connected. Fudge created the database tabs and turned automation on.");
+    // Imported connection codes and recovery can select a different secret.
+    // Refresh the generated copy so a later update preserves the live connection.
+    try {
+      await loadSetup();
+      showToast("Connected. Collection stays stopped until you press Start collecting.");
+    } catch (_error) {
+      renderConnection(result.database);
+      showToast("Connection saved. Reopen setup before copying an updated connector; collection remains stopped.", "error");
+    }
   } catch (error) {
     showToast(error.message, "error");
   } finally {
-    button.disabled = false;
+    button.disabled = !connectorCode;
     setLabel(button, "Connect Sheet and Drive");
   }
 });
@@ -70,11 +99,15 @@ $("#copyConnectionButton").addEventListener("click", async () => {
 });
 
 $("#disconnectButton").addEventListener("click", async () => {
-  const result = await chrome.runtime.sendMessage({ type: "DISCONNECT_SCRIPT" });
-  if (!result.ok) return showToast(result.error, "error");
-  $("#webAppUrl").value = "";
-  renderConnection(null);
-  showToast("Connector removed from Fudge. Your Sheet and Drive files were not deleted.");
+  try {
+    const result = await chrome.runtime.sendMessage({ type: "DISCONNECT_SCRIPT" });
+    if (!result?.ok) throw new Error(result?.error || "Disconnect could not finish. Try again.");
+    $("#webAppUrl").value = "";
+    renderConnection(null);
+    showToast("Connector removed from Fudge. Your Sheet and Drive files were not deleted.");
+  } catch (error) {
+    showToast(error.message, "error");
+  }
 });
 
-loadSetup().catch((error) => showToast(error.message, "error"));
+const setupReady = loadSetup().catch((error) => showToast(error.message, "error"));

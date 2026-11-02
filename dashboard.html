@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>Fudge — Review Library</title>
+  <title>fudge — Review Library</title>
   <link rel="stylesheet" href="styles.css" />
 </head>
 <body class="app">
@@ -35,7 +35,7 @@
 </svg>
 
   <aside class="rail">
-    <div class="rail__brand"><img src="assets/logo.png" alt="Fudge" /></div>
+    <div class="rail__brand"><img src="assets/logo.png" alt="fudge" /></div>
     <nav class="rail__nav" aria-label="Sections">
       <button class="rail__item is-active" aria-current="page" data-tip="Review library">
         <svg class="icon"><use href="#i-library" /></svg>
@@ -55,7 +55,7 @@
 
     <div class="topbar">
       <nav class="crumbs" aria-label="Breadcrumb">
-        <span>Fudge</span>
+        <span>fudge</span>
         <svg class="icon icon--sm"><use href="#i-chevron-right" /></svg>
         <b>Review library</b>
       </nav>
@@ -130,6 +130,7 @@
         <div class="skeleton__row"></div>
       </div>
     </section>
+    <details class="release-info"><summary>versions</summary><p data-release-info>Checking version metadata…</p></details>
 
   </div>
 
@@ -200,6 +201,7 @@
 
   <div class="toast" id="toast" role="status" aria-live="polite"></div>
 
+  <script src="release-info.js"></script>
   <script src="shared.js"></script>
   <script src="config.js"></script>
   <script src="rewriter.js"></script>

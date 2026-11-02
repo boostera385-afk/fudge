@@ -1,8 +1,8 @@
-# Fudge 2.0 — Google Review Collector & Sheets Fulfillment
+# fudge 2.0.1 — Google Review Collector & Sheets Fulfillment
 
 <p align="center">
   <img src="https://img.shields.io/badge/Chrome%20%2F%20Edge-Manifest%20V3-4285F4?logo=googlechrome&logoColor=white" alt="Chrome / Edge — Manifest V3">
-  <img src="https://img.shields.io/badge/version-2.0-brightgreen" alt="Version 2.0">
+    <img src="https://img.shields.io/badge/version-2.0.1-brightgreen" alt="Version 2.0.1">
   <img src="https://img.shields.io/badge/language-JavaScript-f7df1e?logo=javascript&logoColor=black" alt="JavaScript">
   <img src="https://img.shields.io/badge/dependencies-none-success" alt="Zero dependencies">
   <img src="https://img.shields.io/badge/backend-Google%20Sheets%20%2B%20Apps%20Script-34A853?logo=googlesheets&logoColor=white" alt="Google Sheets + Apps Script">
@@ -12,6 +12,14 @@
 **Fudge** is a Chrome/Edge Manifest V3 extension that collects and classifies five-star Google reviews, keeps a deduplicated local review library, and automatically fulfills a Google Sheets work queue — opening Google itself, scanning the right businesses, and filing the right reviews into your spreadsheet while you do something else.
 
 For the complete cross-system implementation guide, start with the [Fudge + ND Master Automation Plan](docs/MASTER-AUTOMATION-PLAN.md). It covers ingestion, cleanup, approval, Sheets, local execution, profiles, checks, comments, controlled reposting, recovery and phased acceptance. This is a plan, not delivered end-to-end automation.
+
+**Release candidate, not a client live-acceptance certificate.** Extension **2.0.1**
+ships connector template **43**. Open **versions** in the sidebar, library or setup
+page for the actual extension version, expected connector and last observed remote
+version/time. A cached response is not a fresh connection test. The unpacked ID
+and storage keys are unchanged; update the existing folder and **Reload**, never
+remove/re-add an existing client installation. The normal account/library/Sheets
+flow and the unreleased ND upload/catalog gates remain separate.
 
 The [optional ND backend setup and durable uploader](docs/BACKEND-UPLOADER.md) is implemented with local/mock tests. Open **ND backend intake → Setup** after reloading this unpacked extension. The shared intake schema is deployed; **upload release stays off** pending browser acceptance, policy decisions and a pilot. Opening setup or signing in never migrates the existing library. Collection and Sheets behavior remain unchanged.
 
@@ -138,6 +146,9 @@ Fudge uses a **protected Apps Script connector** — no Google Cloud Console pro
 1. Choose **Connect** under *Sheets automation* in the Fudge sidebar.
 2. Create or open the Google Sheet you want to use and choose **Extensions → Apps Script**.
 3. Copy the complete protected connector from Fudge, replace the starter code, and save it.
+   Copy using the extension's button, **not the raw GitHub/local `apps-script.gs`**.
+   The button inserts your private connection secret; never share or commit that
+   generated code. The preview shows its template version without revealing the secret.
 4. Refresh the Sheet, then choose **Fudge → Set OpenAI API key** and paste your key (stored as `FUDGE_OPENAI_API_KEY`).
 5. Select `fudgeInstallAutomation` beside **Run**, click **Run**, and approve Google's permissions once. Fudge installs triggers itself on first connect; this step is a fallback that grants the permission it needs.
 6. **Deploy → New deployment → Web app**. Set **Execute as** = *Me*, access = *Anyone*, then deploy.
@@ -363,11 +374,17 @@ Fudge/
 ```bash
 node tests/smoke.test.js
 node --test tests/backend.test.js
+node --test tests/setup.test.js tests/versions.test.js
 ```
 
 Runs the smoke tests with plain Node — no test framework, no npm install. The suite covers used-data isolation, keyword/trade boundaries, QC replacement, transient-retry behavior, connector-version tolerance, parallel tab-job accounting, batch limits, and more.
 
 The suite reads `REQUIRED_CONNECTOR_VERSION` straight from `sheets.js`, so bumping the connector version never breaks a test that only meant "a current connector".
+
+Developer-only real UI fixture (requires an existing Playwright development
+environment): `python scripts/verify-setup-browser.py --browser <Chrome-or-Edge-executable>`.
+It uses a fresh isolated browser, mocked Chrome APIs and intercepted local files,
+not an installed extension, real Google/OpenAI request or customer profile.
 
 ## 🔁 Updating the Sheet connector
 
@@ -380,6 +397,15 @@ The connector is **Apps Script code living inside your spreadsheet** — `apps-s
 5. **Deploy → Manage deployments → ✏️ → Version: New version → Deploy.**
 
 The `/exec` URL never changes, so nothing needs re-pasting. Every connector returns `FUDGE_CONNECTOR_VERSION`; when the deployed copy is older, Fudge keeps syncing the tabs that copy understands and the side panel reports *"Sheet connector is out of date"* instead of failing silently. Changing the Google tab limit or check cadence requires no new deployment. Disconnecting via **Change sheet** clears every cache tied to the old spreadsheet (known review IDs, fingerprints, logged businesses), so the next sheet starts clean.
+
+Connector 43 also adds **Set rephrasing model** and **Check model access (no
+generation)** to the Sheet menu. The model ID is configuration, not proof of
+availability. Check model access performs only a provider metadata GET: no review
+text, generation request or Sheet/property write. Even a successful check does
+not establish generation permissions, quota, parameter support or rewrite quality;
+run **Test rephrasing** separately with authorization. No client key is shipped
+and the configured/default model is not silently changed. Provider errors redact
+the saved key rather than echoing raw response bodies into notes/status.
 
 ## 🛠️ Troubleshooting & FAQ
 
@@ -401,15 +427,20 @@ The `/exec` URL never changes, so nothing needs re-pasting. Every connector retu
 
 ## 🔒 Privacy
 
-Fudge stores collected review data and Used status **locally in the browser** via `chrome.storage.local`. Data survives closing and reopening Chrome and persists until the extension is removed, its site data is cleared, or a confirmed **Clear unused data** / **Clear Used data** action runs. The existing Sheets connection sends structured review data and selected image URLs to the Apps Script web app deployed inside your own Google account. Optional ND backend sign-in sends credentials only to the pinned shared project's Supabase Auth endpoint; passwords are not stored and user tokens stay in trusted session storage. Backend upload release is currently off. A later approved release plus explicit consent may upload original-field snapshots and author/photo provenance to the selected organization. Queued snapshots/backend copies are separate from library deletion; pause/cancel unwanted pending snapshots first. See [backend privacy/lifecycle details](docs/BACKEND-UPLOADER.md). OpenAI receives text solely during an explicit rewrite/rephrase request, honoring the caching and rules above.
+Fudge stores collected review data and Used status **locally in the browser** via `chrome.storage.local`. Data survives closing and reopening Chrome and persists until the extension is removed, its site data is cleared, or a confirmed **Clear unused data** / **Clear Used data** action runs. The existing Sheets connection sends structured review data and selected image URLs to the Apps Script web app deployed inside your own Google account. Optional ND backend sign-in sends credentials only to the pinned shared project's Supabase Auth endpoint; passwords are not stored and user tokens stay in trusted session storage. Backend upload release is currently off. A later approved release plus explicit consent may upload original-field snapshots and author/photo provenance to the selected organization. Queued snapshots/backend copies are separate from library deletion; pause/cancel unwanted pending snapshots first. See [backend privacy/lifecycle details](docs/BACKEND-UPLOADER.md). OpenAI receives review text during authorized writer workflows, including the installed automatic Sheet triggers; the metadata-only model access check sends no review text.
 
 ## ⚖️ Responsible use
 
 Fudge automates browsing of Google (Maps/Search) and honors rate-limit pages by **pausing politely rather than circumventing them** — there is no CAPTCHA solving, proxying, or evasion. You are responsible for using Fudge within Google's Terms of Service, applicable law, and the platform account you automate it against. Published rewrites are presented as writer's drafts; you are responsible for what you publish.
 
+Preserve source provenance, verify factual accuracy and obtain permission/rights
+before reuse. Do not present another customer's experience as the client's own
+testimonial or invent service/identity claims. An AI draft is not authorization,
+evidence that a job occurred or a transferable customer endorsement.
+
 ## 🧾 Versioning & tags
 
-- Extension version lives in `manifest.json` — current: **`2.0`**.
+- Extension version lives in `manifest.json` — current: **`2.0.1`**.
 - Connector template version lives in `apps-script.gs` as `FUDGE_CONNECTOR_VERSION`; the extension's expectation in `sheets.js` as `REQUIRED_CONNECTOR_VERSION`.
 - Git releases are tagged `v<version>` matching the manifest (e.g. [`v2.0`](https://github.com/boostera385-afk/fudge/releases)), so a connected Sheet's connector version can always be diffed against the template it came from.
 

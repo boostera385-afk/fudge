@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>Fudge</title>
+  <title>fudge</title>
   <link rel="stylesheet" href="styles.css" />
 </head>
 <body class="panel">
@@ -32,8 +32,8 @@
   <header class="panel-top">
     <div class="brand">
       <span class="brand-mark"><img src="assets/logo.png" alt="" /></span>
-      <span class="brand-name">Fudge</span>
-      <span class="tag tag--version">2.0</span>
+      <span class="brand-name">fudge</span>
+      <span class="tag tag--version" data-extension-version>—</span>
     </div>
     <button class="icon-btn" id="openDashboard" aria-label="Open review library" title="Open review library">
       <svg class="icon icon--sm"><use href="#i-external" /></svg>
@@ -249,6 +249,8 @@
     </div>
   </dialog>
 
+  <details class="release-info"><summary>versions</summary><p data-release-info>Checking version metadata…</p></details>
+  <script src="release-info.js"></script>
   <script src="shared.js"></script>
   <script src="sidepanel.js"></script>
 </body>

@@ -6,7 +6,7 @@ const SheetsService = (() => {
   const SERVICE_HEADERS = ["Service Keyword", "Status", "Reviews Collected", "Notes", "Search Term", "Business Name Keywords", "Review Keywords", "Required Review Keywords", "Google Filter Keywords", "Exclude Keywords", "Service Family", "Subcategory", "Topic Filter Required", "Collect Family Reviews", "Rewrite Service Phrase", "Equivalent Service Phrases"];
   // The connector lives inside the user's spreadsheet, so it can be older than the
   // extension. Anything above version 1 knows about the Cities and Services tabs.
-  const REQUIRED_CONNECTOR_VERSION = 42;
+  const REQUIRED_CONNECTOR_VERSION = 43;
   // The selected tab limit controls how many distinct keywords the Sheet returns.
   const DEFAULT_PARALLEL_JOBS = 3;
   const MAX_PARALLEL_JOBS = 6;
@@ -18,6 +18,8 @@ const SheetsService = (() => {
   // broken, so after a few in a row Fudge stops calling it a passing hiccup.
   let softFailures = 0;
   let connectorVersion = 0;
+  let connectorObservation = null;
+  let connectorObservationSavedAt = 0;
   // How long a single connector request may take before Fudge gives up on it. The
   // Apps Script side can be held up by its own rephrasing pass, and a fetch with no
   // deadline left the whole sync wedged with nothing on screen to explain it.
@@ -130,7 +132,18 @@ const SheetsService = (() => {
     // Read the version even from a refusal. A connector that is too old to answer
     // without blocking is exactly the case where Fudge needs to be able to say so,
     // and learning the version only from successful replies meant it never could.
-    if (result && Number(result.connectorVersion)) connectorVersion = Number(result.connectorVersion);
+    const responseVersion = Number(result?.connectorVersion);
+    if (Number.isSafeInteger(responseVersion) && responseVersion > 0) {
+      connectorVersion = responseVersion;
+      const changed = connectorObservation?.endpoint !== appsScriptUrl || connectorObservation?.version !== responseVersion;
+      connectorObservation = { endpoint: appsScriptUrl, version: responseVersion, observedAt: now() };
+      if (changed || Date.now() - connectorObservationSavedAt > 60_000) {
+        // Diagnostics must never turn an already-successful Sheet write into a
+        // reported failure/retry if saving this optional local hint fails.
+        try { await chrome.storage.local.set({ sheetsConnectorObservation: connectorObservation }); } catch (_error) { /* optional metadata only */ }
+        connectorObservationSavedAt = Date.now();
+      }
+    }
     if (!result) {
       const authorizationPage = /authorization|authorize|permission|access denied|sign in|accounts\.google/i.test(raw);
       const message = authorizationPage
@@ -165,7 +178,7 @@ const SheetsService = (() => {
         ? "The deployed connector still contains the old trigger setup. Copy the newest connector, save it, run fudgeInstallAutomation once, and deploy a new version."
         : result.error || "The Fudge connector could not complete this request.");
     }
-    connectorVersion = Number(result.connectorVersion) || 1;
+    connectorVersion = Number.isSafeInteger(responseVersion) && responseVersion > 0 ? responseVersion : 1;
     return result;
   }
 
@@ -175,6 +188,7 @@ const SheetsService = (() => {
     const appsScriptSecret = clean(parsed.secret);
     if (!validUrl(appsScriptUrl)) throw new Error("Paste the deployed Apps Script URL ending in /exec.");
     if (appsScriptSecret.length < 24) throw new Error("The Fudge connector secret is missing.");
+    connectorVersion = 0;
     await chrome.storage.local.set({ appsScriptUrl, appsScriptSecret, appsScriptSecretBackup: appsScriptSecret });
     try {
       // A deployment baked earlier by this same installation answers to a secret
@@ -221,7 +235,10 @@ const SheetsService = (() => {
     // this one's "already known" sets and silently refuses to record anything.
     // appsScriptSecretOwn deliberately survives: it is baked into connectors this
     // installation generated, so discarding it would strand its own deployments.
-    await chrome.storage.local.remove(["appsScriptUrl", "appsScriptSecret", "appsScriptSecretBackup", "sheetsDatabase", "sheetsStatus", "sheetKnownReviewIds", "sheetKnownReviewFingerprints", "sheetKnownReviewContentKeys", "recordedBusinessKeys", "activeServiceKeywords", "serviceRules"]);
+    await chrome.storage.local.remove(["appsScriptUrl", "appsScriptSecret", "appsScriptSecretBackup", "sheetsDatabase", "sheetsStatus", "sheetsConnectorObservation", "sheetKnownReviewIds", "sheetKnownReviewFingerprints", "sheetKnownReviewContentKeys", "recordedBusinessKeys", "activeServiceKeywords", "serviceRules"]);
+    connectorVersion = 0;
+    connectorObservation = null;
+    connectorAutomation = null;
     await chrome.storage.local.set({ runState: "stopped", sheetsAutomation: false, saveToDrive: false });
   }
 
@@ -1075,10 +1092,14 @@ const SheetsService = (() => {
   }
 
   const status = async () => {
-    const settings = await chrome.storage.local.get({ sheetsDatabase: null, runState: "", sheetsAutomation: false, sheetsStatus: null, appsScriptUrl: "", appsScriptSecret: "", appsScriptSecretBackup: "" });
+    const settings = await chrome.storage.local.get({ sheetsDatabase: null, runState: "", sheetsAutomation: false, sheetsStatus: null, appsScriptUrl: "", appsScriptSecret: "", appsScriptSecretBackup: "", sheetsConnectorObservation: null });
     const secret = clean(settings.appsScriptSecret || settings.appsScriptSecretBackup);
     const runState = settings.runState || (settings.sheetsAutomation ? "running" : "stopped");
-    return { sheetsDatabase: settings.sheetsDatabase, runState, sheetsAutomation: runState === "running", sheetsStatus: settings.sheetsStatus, appsScriptUrl: settings.appsScriptUrl, automation: connectorAutomation, connectionReady: Boolean(settings.sheetsDatabase?.connector === "apps-script" && validUrl(settings.appsScriptUrl) && secret.length >= 24) };
+    const observation = connectorObservation?.endpoint === settings.appsScriptUrl ? connectorObservation : settings.sheetsConnectorObservation;
+    const seen = observation?.endpoint === settings.appsScriptUrl && Number.isSafeInteger(observation.version) && observation.version > 0;
+    return { sheetsDatabase: settings.sheetsDatabase, runState, sheetsAutomation: runState === "running", sheetsStatus: settings.sheetsStatus, appsScriptUrl: settings.appsScriptUrl, automation: connectorAutomation, expectedConnectorVersion: REQUIRED_CONNECTOR_VERSION,
+      connectorVersion: seen ? observation.version : null, connectorObservedAt: seen ? observation.observedAt : null,
+      connectionReady: Boolean(settings.sheetsDatabase?.connector === "apps-script" && validUrl(settings.appsScriptUrl) && secret.length >= 24) };
   };
   return { configure, disconnect, getSetup, getConnectionCode, createConnectionCode, ensureDatabase, ensureAutomation, fillRowsNow, rephraseNow, sync, recordProgress, recordBusiness, saveReviews, status, rewriteReview };
 })();

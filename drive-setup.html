@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>Fudge — Easy Google Setup</title>
+  <title>fudge — Easy Google Setup</title>
   <link rel="stylesheet" href="styles.css" />
 </head>
 <body class="setup-page">
@@ -19,7 +19,7 @@
 
   <main class="setup-shell">
     <header class="setup-head">
-      <div class="brand"><span class="brand-mark"><img src="assets/logo.png" alt="" /></span><span class="brand-name">Fudge</span></div>
+      <div class="brand"><span class="brand-mark"><img src="assets/logo.png" alt="" /></span><span class="brand-name">fudge</span><small data-extension-version>—</small></div>
       <span class="pill pill--ok"><i class="dot"></i>Extension setup</span>
     </header>
 
@@ -38,8 +38,9 @@
         <p>Create or open the Sheet you want Fudge to use. Choose <b>Extensions → Apps Script</b>, delete the starter code, and paste this complete connector.</p>
         <div class="copy-field">
           <code id="scriptPreview">Preparing your protected connector…</code>
-          <button class="icon-btn icon-btn--sm" id="copyScript" aria-label="Copy Apps Script connector"><svg class="icon icon--sm"><use href="#i-copy" /></svg></button>
+          <button class="icon-btn icon-btn--sm" id="copyScript" aria-label="Copy Apps Script connector" disabled><svg class="icon icon--sm"><use href="#i-copy" /></svg></button>
         </div>
+        <p class="setup-note">Copy using this button, not the raw GitHub file: Fudge inserts your private connection secret. Never share or commit the generated code. Reload the extension before copying an updated connector.</p>
         <a class="text-link" href="https://sheets.new" target="_blank" rel="noreferrer">Create a blank Google Sheet <svg class="icon icon--sm"><use href="#i-arrow-ur" /></svg></a>
       </section>
 
@@ -63,7 +64,7 @@
         <input class="input setup-input" id="webAppUrl" autocomplete="off" spellcheck="false" placeholder="https://script.google.com/macros/s/…/exec or FUDGE1|…" />
         <p class="setup-note">For a new Sheet, use the deployed URL ending in <b>/exec</b>. To share a Sheet that is already connected somewhere else, paste its <b>connection code</b>, not its URL: every installation of Fudge invents its own secret, so the URL on its own is always rejected. On the connected computer open <b>Change sheet → Copy connection code</b> and paste the <b>FUDGE1|</b> code here. That deployment must also be set to <b>Who has access: Anyone</b>, or Google answers 404 for everyone except its owner.</p>
         <p class="setup-note">The Apps Script edit trigger rephrases reviews entered in <b>Structure → Review</b> into <b>Rephrased Content</b>. It uses that row's <b>Numbers</b> cell for the phone number and continues working when Fudge is not installed.</p>
-        <button class="btn btn--primary btn--lg btn--block" id="connectButton">
+        <button class="btn btn--primary btn--lg btn--block" id="connectButton" disabled>
           <svg class="icon icon--sm"><use href="#i-cloud-up" /></svg>
           <span data-label>Connect Sheet and Drive</span>
         </button>
@@ -84,6 +85,8 @@
   </main>
 
   <div class="toast" id="toast" role="status" aria-live="polite"></div>
+  <details class="release-info"><summary>versions</summary><p data-release-info>Checking version metadata…</p></details>
+  <script src="release-info.js"></script>
   <script src="drive-setup.js"></script>
 </body>
 </html>
