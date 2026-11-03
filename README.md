@@ -14,7 +14,7 @@
 For the complete cross-system implementation guide, start with the [Fudge + ND Master Automation Plan](docs/MASTER-AUTOMATION-PLAN.md). It covers ingestion, cleanup, approval, Sheets, local execution, profiles, checks, comments, controlled reposting, recovery and phased acceptance. This is a plan, not delivered end-to-end automation.
 
 **Release candidate, not a client live-acceptance certificate.** Extension **2.0.1**
-ships connector template **43**. Open **versions** in the sidebar, library or setup
+ships connector template **45**. Open **versions** in the sidebar, library or setup
 page for the actual extension version, expected connector and last observed remote
 version/time. A cached response is not a fresh connection test. The unpacked ID
 and storage keys are unchanged; update the existing folder and **Reload**, never
@@ -419,7 +419,7 @@ the saved key rather than echoing raw response bodies into notes/status.
 
 **Does the Sheet fill itself without Chrome?** Yes — the connector fills rows from existing inventory, rephrases filled rows, and handles QC replacement while Chrome is closed. It cannot browse Google; collecting more reviews requires the extension.
 
-**Drive links stay empty.** *Upload originals* is off — reviews stay local. Turning it on uploads in the background so links appear after a later sync.
+**Drive links stay empty.** With a Sheet connected, Fudge copies collected Google review photos to Drive as JPGs even when the scan-time *Upload originals* toggle is off. A row waits for Drive pictures rather than receiving a Google URL. Reload the extension and refresh the Google runner tabs after updating; then sync. Connector **45** fixes JPEG URL options/query handling; deploy the updated protected connector too. Photos that were never captured need to be collected again; no unrelated replacement images are substituted.
 
 **A keyword/city is marked `Exhausted`.** Every Google page for that combination has been visited (page limit reached or no next page). The service moves to its next shuffled city automatically; silence means progress, not failure.
 

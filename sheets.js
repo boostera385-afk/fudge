@@ -6,7 +6,7 @@ const SheetsService = (() => {
   const SERVICE_HEADERS = ["Service Keyword", "Status", "Reviews Collected", "Notes", "Search Term", "Business Name Keywords", "Review Keywords", "Required Review Keywords", "Google Filter Keywords", "Exclude Keywords", "Service Family", "Subcategory", "Topic Filter Required", "Collect Family Reviews", "Rewrite Service Phrase", "Equivalent Service Phrases"];
   // The connector lives inside the user's spreadsheet, so it can be older than the
   // extension. Anything above version 1 knows about the Cities and Services tabs.
-  const REQUIRED_CONNECTOR_VERSION = 44;
+  const REQUIRED_CONNECTOR_VERSION = 45;
   // The selected tab limit controls how many distinct keywords the Sheet returns.
   const DEFAULT_PARALLEL_JOBS = 3;
   const MAX_PARALLEL_JOBS = 6;
@@ -593,7 +593,17 @@ const SheetsService = (() => {
       const updates = [...serviceRuleUpdates];
       const localById = new Map(localReviews.map((review) => [review.id, review]));
       reviewById.forEach((entry, id) => {
-        const originalLinks = splitLinks(entry.row[9]).join("\n");
+        const local = localById.get(id);
+        const recoveredPhotos = local?.photos || [];
+        // A duplicate capture can upgrade text or discover previously lazy photos.
+        // Existing Reviews rows need those upgrades too, not only the Drive links;
+        // a stale "Without Picture" type otherwise blocks a picture requirement.
+        const originals = recoveredPhotos.length
+          ? [...new Set([...splitLinks(entry.row[9]).filter((link) => /^https:\/\//i.test(link)), ...recoveredPhotos].map(Fudge.originalPhotoUrl))]
+          : splitLinks(entry.row[9]);
+        const originalLinks = originals.join("\n");
+        const upgradedText = (local?.text || "").length > entry.row[7].length ? local.text : entry.row[7];
+        const upgradedMode = recoveredPhotos.length ? modeLabel("photo") : entry.row[8];
         // A review is usually appended before its pictures finish uploading, so
         // the Drive links arrive in the library later. Carry them into the row;
         // otherwise Drive Picture Links, and every Structure row filled from it,
@@ -610,12 +620,17 @@ const SheetsService = (() => {
             : owner.drivePhotos?.[index] || null);
           owner.adoptedDrivePhotos = true;
         }
-        if (entry.row[9] !== originalLinks || entry.row[10] !== driveLinks) {
+        if (entry.row[7] !== upgradedText || entry.row[8] !== upgradedMode) {
+          entry.row[7] = upgradedText;
+          entry.row[8] = upgradedMode;
+          entry.row[9] = originalLinks;
+          entry.row[10] = driveLinks;
+          if (entry.rowNumber) updates.push({ range: `Reviews!H${entry.rowNumber}:K${entry.rowNumber}`, values: [[upgradedText, upgradedMode, originalLinks, driveLinks]] });
+        } else if (entry.row[9] !== originalLinks || entry.row[10] !== driveLinks) {
           entry.row[9] = originalLinks;
           entry.row[10] = driveLinks;
           if (entry.rowNumber) updates.push({ range: `Reviews!J${entry.rowNumber}:K${entry.rowNumber}`, values: [[originalLinks, driveLinks]] });
         }
-        const local = localById.get(id);
         if (!local) return;
         const serviceLabel = local.service?.label || entry.row[2];
         const subcategoryLabel = local.service?.subcategory?.label || entry.row[3];

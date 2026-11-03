@@ -1,4 +1,4 @@
-# fudge 2.0.1 / connector 43 — QA release status
+# fudge 2.0.1 / connector 45 — QA release status
 
 This is an installable source candidate, **not signed-off live client acceptance**.
 The public brand is lowercase `fudge`; internal protocol/storage identifiers and
@@ -27,7 +27,24 @@ the existing unpacked extension ID are unchanged.
   Existing rewriter regression fixes and Start/Stop recovery remain in place.
   No backend upload/catalog release gate was enabled.
 
-Validation: **132 smoke, 67 backend and 18 setup/version tests PASS**, all root
+## Review/photo repair (connector 45)
+
+- Scraping reads unlabelled Maps background photos, lazy image sources and small
+  attached thumbnails; excludes author avatars, icons and data placeholders.
+- Library normalization keeps Drive copies aligned when excluding an avatar.
+  Sheet sync upgrades existing inventory text, photo type and original links
+  when a local review gains photos/full text, so picture rows can use it.
+- Google photo URLs retain query tokens; JPEG requests replace WebP/AVIF flags
+  and support the older ggpht CDN. Photos still go directly to Drive as `.jpg`,
+  with one sharing link per line in the existing Sheet cell. Upload controls,
+  posting behavior and backend release gates are unchanged.
+
+Repair validation: **136 smoke + 85 backend/setup/version tests PASS** using local
+fixtures. No live customer Sheet, installed extension or Drive was accessed for
+this repair. Missing source photos must be collected again; an empty picture
+cell cannot be reconstructed from text alone.
+
+Earlier release validation: **132 smoke, 67 backend and 18 setup/version tests PASS**, all root
 JS/Apps Script syntax checks PASS; `git diff --check` PASS (line-ending notices
 only). Real installed Chrome, fresh isolated context and intercepted local files:
 setup/copy/reconnect/clipboard refusal, lowercase/version rendering, no preview
@@ -42,12 +59,12 @@ was accessed/changed by those fixtures.
    unpacked folder. **Reload**, never remove/re-add the extension. A temporary
    outdated-connector warning is expected until step 3; older compatible
    connectors can still sync their supported tabs.
-2. Open Change sheet → copy the protected connector. Confirm preview **v43**.
+2. Open Change sheet → copy the protected connector. Confirm preview **v45**.
    Do not paste raw GitHub/local `apps-script.gs`: it still has a secret placeholder.
 3. Paste into the existing Sheet's Apps Script project, save, approve permissions
    if required, and edit its existing deployment → New version → Deploy. Keep its
    URL/secret and Script Properties private. Never put generated code in a repo.
-4. Sync and check `versions`: extension **2.0.1**, last connector response **v43**
+4. Sync and check `versions`: extension **2.0.1**, last connector response **v45**
    for the intended Sheet. Verify the actual trigger status in the Sheet menu.
 5. Set the client's own API key/model privately. Run Check model access, then a
    separately authorized Test rephrasing on suitable content. Metadata access alone

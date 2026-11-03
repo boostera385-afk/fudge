@@ -136,22 +136,26 @@
     return 0;
   };
   const photoUrls = (card) => {
-    const attached = [...card.querySelectorAll(".SeRB9d, [alt*=' in review by'], [alt*='review by'][data-index], [alt^='Photo'][data-index], [role='listitem'] [data-index]")]
-      .map((node) => node.currentSrc || node.src || node.getAttribute("data-src") || node.querySelector("img")?.currentSrc || node.querySelector("img")?.src || node.style.backgroundImage.match(/url\(["']?(.*?)["']?\)/)?.[1]);
-    const images = [...card.querySelectorAll("button img, a img")]
-      .filter((image) => {
-        const width = image.naturalWidth || Number(image.getAttribute("width")) || image.clientWidth;
-        const height = image.naturalHeight || Number(image.getAttribute("height")) || image.clientHeight;
-        const label = image.closest("button, a")?.getAttribute("aria-label") || "";
-        return !image.matches(".NBa7we, [class*='avatar']") && !/profile|avatar/i.test(label) && !(width && height && width <= 80 && height <= 80);
-      })
-      .map((image) => image.currentSrc || image.src);
-    const backgrounds = [...card.querySelectorAll("button[style*='background-image'], [role='button'][style*='background-image']")]
-      .filter((node) => /photo|image/i.test(`${node.getAttribute("aria-label") || ""} ${node.getAttribute("alt") || ""}`))
-      .map((node) => node.style.backgroundImage.match(/url\(["']?(.*?)["']?\)/)?.[1]);
-    return [...new Set([...attached, ...images, ...backgrounds])]
-      .filter((src) => src && !/googleusercontent\.com\/a-|profile|s40-c|s64-c/i.test(src))
-      .map(Fudge.originalPhotoUrl);
+    // Maps uses unlabelled background buttons; Search also lazy-loads images
+    // whose src is still a data: placeholder. Read every source, not just the
+    // first truthy one, and do not mistake a small attached photo for an avatar.
+    const nodes = [...card.querySelectorAll(".SeRB9d, img, [data-src], [data-iurl], [style*='background-image']")];
+    const urls = nodes.flatMap((node) => {
+      const parent = node.closest("button, a, [role='button']");
+      const label = `${node.getAttribute("alt") || ""} ${node.getAttribute("aria-label") || ""} ${parent?.getAttribute("aria-label") || ""}`;
+      if (node.matches(".NBa7we, [class*='avatar']") || /profile|avatar/i.test(label)) return [];
+      return [node.currentSrc, node.src, node.getAttribute("data-src"), node.getAttribute("data-iurl"),
+        node.style?.backgroundImage?.match(/url\(["']?(.*?)["']?\)/)?.[1],
+        ...(node.getAttribute("srcset") || "").split(",").map((item) => item.trim().split(/\s+/)[0])];
+    }).filter((src) => {
+      if (!src) return false;
+      try {
+        const url = new URL(src);
+        return url.protocol === "https:" && /(^|\.)(googleusercontent\.com|ggpht\.com)$/i.test(url.hostname)
+          && !/^\/a(?:\/|-)/i.test(url.pathname) && !/profile/i.test(url.pathname);
+      } catch (_error) { return false; }
+    });
+    return [...new Set(urls.map(Fudge.originalPhotoUrl))];
   };
   const getPlace = () => {
     // Search Places currently uses RjvGlb for the selected business heading and

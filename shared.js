@@ -285,9 +285,8 @@ const Fudge = (() => {
   };
   const originalPhotoUrl = (value = "") => {
     if (!value) return "";
-    return /googleusercontent\.com/i.test(value)
-      ? value.replace(/=[whs]\d+(?:-[a-z0-9-]+)?(?:-[whs]\d+(?:-[a-z0-9-]+)?)?.*$/i, "=s0")
-      : value;
+    const match = String(value).match(/^(https:\/\/(?:[a-z0-9-]+\.)*(?:googleusercontent\.com|ggpht\.com))(\/[^?#]*)([?#].*)?$/i);
+    return match ? match[1] + match[2].replace(/=[whs]\d+[^/]*$/i, "=s0") + (match[3] || "") : value;
   };
   const hash = (value = "") => {
     let result = 2166136261;
@@ -702,19 +701,27 @@ const Fudge = (() => {
     if (!term) return place;
     return place ? `${term} in ${place}` : term;
   };
-  const isLikelyReviewPhoto = (url = "", avatar = "") => url && url !== avatar && !/googleusercontent\.com\/a-|profile|s40-c|s64-c/i.test(url);
+  // A review thumbnail can itself be s64-c. Avatar identity comes from its URL
+  // path (or the captured author URL), not its dimensions.
+  const isLikelyReviewPhoto = (url = "", avatar = "") => /^https:\/\//i.test(url) && originalPhotoUrl(url) !== originalPhotoUrl(avatar)
+    && !/(?:googleusercontent\.com|ggpht\.com)\/a(?:\/|-)|profile/i.test(url);
   const getReviews = () => new Promise((resolve) => chrome.storage.local.get({ reviews: [], serviceRules: [] }, ({ reviews, serviceRules }) => {
     setServiceRules(serviceRules);
     let changed = false;
     const clean = reviews.map((review) => {
       const photos = [...new Set((review.photos || []).filter((url) => isLikelyReviewPhoto(url, review.avatar)).map(originalPhotoUrl))];
+      const driveByPhoto = new Map();
+      (review.photos || []).forEach((url, index) => {
+        if (review.drivePhotos?.[index]) driveByPhoto.set(originalPhotoUrl(url), review.drivePhotos[index]);
+      });
+      const drivePhotos = Array.isArray(review.drivePhotos) ? photos.map((url) => driveByPhoto.get(url) || null) : null;
       const sourceKeyword = review.matchedKeyword || review.searchKeyword || "";
       const target = sourceKeyword ? serviceIdentity(sourceKeyword) : null;
       const identity = `${review.placeName || ""} ${review.business || ""} ${review.placeCategory || ""}`;
       const sourceServiceId = review.sourceServiceId || (target?.matched && businessMatchesKeyword(identity, sourceKeyword) ? target.id : "");
       const service = classifyForKeyword({ ...review, sourceServiceId }, sourceKeyword);
-      if (photos.length !== (review.photos || []).length || sourceServiceId !== (review.sourceServiceId || "") || service.id !== review.service?.id || service.subcategory.id !== review.service?.subcategory?.id) changed = true;
-      return { ...review, photos, sourceServiceId, service };
+      if (photos.length !== (review.photos || []).length || photos.some((url, index) => url !== review.photos[index]) || sourceServiceId !== (review.sourceServiceId || "") || service.id !== review.service?.id || service.subcategory.id !== review.service?.subcategory?.id) changed = true;
+      return { ...review, photos, ...(drivePhotos ? { drivePhotos } : {}), sourceServiceId, service };
     }).filter((review) => {
       const keep = review.rating === 5 && (review.photos.length || review.reviewMode === "without-picture");
       if (!keep) changed = true;

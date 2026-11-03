@@ -7,7 +7,7 @@ const FUDGE_SECRET = "__FUDGE_SECRET__";
 // Bumped whenever this connector's required behavior changes. Fudge reads it from
 // every response so it can tell you when the copy inside your Sheet is older than
 // the extension expects, instead of failing with an unhelpful error.
-const FUDGE_CONNECTOR_VERSION = 44;
+const FUDGE_CONNECTOR_VERSION = 45;
 const FUDGE_WRITER_PROMPT_VERSION = 23;
 const FUDGE_DEFAULT_MALE_NAMES = ["James", "Michael", "Daniel", "David", "Matthew", "Ryan", "Jason", "Andrew", "Brian", "Kevin"];
 const FUDGE_CTA_TEMPLATE_COUNT = 12;
@@ -2288,8 +2288,15 @@ function safeName_(value) {
 
 function jpegPhotoUrl_(url) {
   const text = String(url || "");
-  if (!/googleusercontent\.com/i.test(text)) return text;
-  return /=[^/=]*$/.test(text) ? text.replace(/=([^/=]*)$/, function (_match, options) { return "=" + (/(^|-)rj(-|$)/.test(options) ? options : (options ? options + "-rj" : "s0-rj")); }) : text + "=s0-rj";
+  const match = text.match(/^(https:\/\/(?:[a-z0-9-]+\.)*(?:googleusercontent\.com|ggpht\.com))(\/[^?#]*)([?#].*)?$/i);
+  if (!match) return text;
+  // Encoding flags belong to the path, before a query/token. Remove WebP/AVIF
+  // flags instead of sending contradictory rw-rj options to Google's server.
+  const path = /=[^/=]*$/.test(match[2]) ? match[2].replace(/=([^/=]*)$/, function (_match, options) {
+    const size = options.split("-").filter(function (option) { return option && !/^(?:rw|ra|rj)$/i.test(option); }).join("-") || "s0";
+    return "=" + size + "-rj";
+  }) : match[2] + "=s0-rj";
+  return match[1] + path + (match[3] || "");
 }
 
 function uploadPhotos_(photos) {

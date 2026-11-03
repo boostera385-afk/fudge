@@ -173,6 +173,98 @@ async function testDuplicateMergeKeepsDrivePhotoAlignment() {
   assert.equal(store.data.reviews[0].drivePhotos[1].id, "drive-second");
 }
 
+function testReviewPhotoExtraction() {
+  const source = fs.readFileSync(path.join(root, "content.js"), "utf8");
+  const Fudge = loadShared();
+  const context = { Fudge, URL };
+  vm.createContext(context);
+  vm.runInContext(`${source.slice(source.indexOf("  const photoUrls ="), source.indexOf("  const getPlace ="))}\n;globalThis.extract = photoUrls;`, context);
+  const node = (attrs = {}, extra = {}) => ({
+    style: {}, naturalWidth: 0, naturalHeight: 0, clientWidth: 0, clientHeight: 0,
+    getAttribute: (key) => attrs[key] || "",
+    matches: (selector) => selector.includes("avatar") && /avatar|NBa7we/.test(attrs.class || ""),
+    closest: () => null,
+    querySelector: () => null,
+    querySelectorAll: () => [],
+    ...extra
+  });
+  const background = node({}, { style: { backgroundImage: 'url("https://lh3.googleusercontent.com/p/maps-photo=w120-h90-k-no")' } });
+  const lazy = node({ "data-src": "https://lh3.googleusercontent.com/p/lazy-photo=w200-h150" }, { src: "data:image/gif;base64,placeholder" });
+  const small = node({ alt: "Photo 1 in review by Customer" }, { src: "https://lh3.googleusercontent.com/p/small-photo=s64-c", naturalWidth: 64, naturalHeight: 64 });
+  const duplicate = node({}, { src: "https://lh3.googleusercontent.com/p/maps-photo=w400-h300" });
+  const avatar = node({ class: "NBa7we" }, { src: "https://lh3.googleusercontent.com/a/author=s64-c", naturalWidth: 64, naturalHeight: 64 });
+  const oldAvatar = node({}, { src: "https://lh3.googleusercontent.com/a-/author=s128-c" });
+  const icon = node({}, { src: "https://www.gstatic.com/icon.png" });
+  const nodes = [background, lazy, small, duplicate, avatar, oldAvatar, icon];
+  // A card contains only its own photos/author; query selection still distinguishes
+  // attached Search images, ordinary images and Maps background buttons.
+  const card = { querySelectorAll: (selector) => nodes.filter((item) => {
+    if (item === background) return /background-image|button/.test(selector);
+    if (item === small) return /img|alt|SeRB9d/.test(selector);
+    return /img/.test(selector);
+  }) };
+  assert.deepEqual(Array.from(context.extract(card)).sort(), [
+    "https://lh3.googleusercontent.com/p/small-photo=s0",
+    "https://lh3.googleusercontent.com/p/lazy-photo=s0",
+    "https://lh3.googleusercontent.com/p/maps-photo=s0"
+  ].sort(), "lazy/Maps/small attached photos survive, avatars and placeholders do not");
+  assert.deepEqual(Array.from(context.extract({ querySelectorAll: () => [background] })),
+    ["https://lh3.googleusercontent.com/p/maps-photo=s0"], "an unlabelled Maps background photo needs no duplicate img node");
+}
+
+async function testSmallReviewPhotosSurviveLibraryNormalization() {
+  const store = storage({ reviews: [{
+    id: "small", rating: 5, text: "They assembled our bed.", reviewMode: "photo",
+    avatar: "https://lh3.googleusercontent.com/a/author=s40-c",
+    photos: ["https://lh3.googleusercontent.com/a/author=s40-c", "https://lh3.googleusercontent.com/p/attached=s64-c"],
+    drivePhotos: [null, { id: "attached-drive-0123456789" }]
+  }] });
+  const context = sheetsContext(store, async () => { throw new Error("No network expected"); });
+  const reviews = await context.__Fudge.getReviews();
+  assert.equal(reviews.length, 1, "normalizing the library must not silently delete a review with a small attached thumbnail");
+  assert.deepEqual(Array.from(reviews[0].photos), ["https://lh3.googleusercontent.com/p/attached=s0"]);
+  assert.equal(reviews[0].drivePhotos[0].id, "attached-drive-0123456789", "removing an avatar must not shift the real photo away from its Drive copy");
+  assert.deepEqual(store.data.reviews[0].photos, ["https://lh3.googleusercontent.com/p/attached=s0"]);
+}
+
+function testJpegDownloadUrlsPreserveQueries() {
+  const context = {};
+  vm.createContext(context);
+  vm.runInContext(fs.readFileSync(path.join(root, "apps-script.gs"), "utf8"), context);
+  assert.equal(context.jpegPhotoUrl_("https://lh3.googleusercontent.com/p/photo=w400-h300-rw?token=abc"),
+    "https://lh3.googleusercontent.com/p/photo=w400-h300-rj?token=abc", "request JPEG in the image path, not after the query string");
+  assert.equal(context.jpegPhotoUrl_("https://lh5.ggpht.com/p/photo=s0-rw"),
+    "https://lh5.ggpht.com/p/photo=s0-rj", "the older Google photo CDN must also request JPEG instead of WebP");
+  assert.equal(context.jpegPhotoUrl_("https://lh3.googleusercontent.com/p/photo?token=abc"),
+    "https://lh3.googleusercontent.com/p/photo=s0-rj?token=abc");
+  assert.equal(context.jpegPhotoUrl_("https://images.example/photo.png?source=googleusercontent.com"),
+    "https://images.example/photo.png?source=googleusercontent.com", "only Google CDN hosts use Google's encoding options");
+  const Fudge = loadShared();
+  assert.equal(Fudge.originalPhotoUrl("https://lh3.googleusercontent.com/p/photo=w200-h100?token=abc"),
+    "https://lh3.googleusercontent.com/p/photo=s0?token=abc", "the source URL must keep tokens too");
+}
+
+async function testSheetRepairsUpgradedReviewPhotos() {
+  const original = "https://lh3.googleusercontent.com/p/recovered=s0";
+  const review = {
+    id: "recovered", author: "Customer", rating: 5, placeName: "Assembly Co", placeId: "place-recovered",
+    text: "They assembled our wardrobe and bed perfectly.", photos: [original], reviewMode: "photo",
+    searchCity: "Houston TX", drivePhotos: [{ id: "recovered-drive-0123456789" }]
+  };
+  const old = [review.id, "old-fingerprint", "Installation", "Furniture assembly", "Houston TX", "Assembly Co", review.placeId,
+    "They assembled our wardrobe.", "Without Picture", "No picture found", "", "Unused"];
+  const run = await runSheetsSync({
+    structureRows: [["REQ-2", "With Picture", "Furniture Assembly", "Houston TX"]],
+    reviewRows: [old], localReviews: [review]
+  });
+  const upgrade = run.valueUpdates.find((update) => update.range === "Reviews!H2:K2");
+  assert.ok(upgrade, "an existing inventory row must receive recovered text, type and originals, not just Drive links");
+  assert.deepEqual(Array.from(upgrade.values[0]), [review.text, "With Picture", original,
+    "https://drive.google.com/file/d/recovered-drive-0123456789/view?usp=sharing"]);
+  const assigned = run.valueUpdates.find((update) => update.range === "Structure!A2:K2");
+  assert.equal(assigned?.values[0][8], review.id, "the repaired photo review fills the waiting row in this sync");
+}
+
 const EXEC_URL = "https://script.google.com/macros/s/AKfycbxTestDeploymentId/exec";
 const SECRET = "fudge-secret-0123456789-abcdefghij";
 
@@ -4105,6 +4197,10 @@ function testTransientRephraseFailureIsRetriedLater() {
     ["unused data isolation", testUnusedDataIsolation],
     ["content duplicate identity", testContentDuplicateIdentity],
     ["duplicate merge keeps Drive alignment", testDuplicateMergeKeepsDrivePhotoAlignment],
+    ["review photo extraction handles lazy and Maps images", testReviewPhotoExtraction],
+    ["small review photos survive library normalization", testSmallReviewPhotosSurviveLibraryNormalization],
+    ["JPEG download URLs preserve queries", testJpegDownloadUrlsPreserveQueries],
+    ["Sheet repairs upgraded review photos", testSheetRepairsUpgradedReviewPhotos],
     ["connector setup", testConnectorSetup],
     ["connector version observations remain scoped after restart", testConnectorVersionObservationSurvivesRestartWithoutCrossingSheets],
     ["optional version metadata never fails the connection", testOptionalVersionMetadataFailureDoesNotFailAConnection],
