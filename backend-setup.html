@@ -5,7 +5,7 @@
   <main class="setup-shell">
     <header class="setup-head"><div class="brand"><span class="brand-name">fudge</span><small data-extension-version>—</small></div><a class="text-link" href="dashboard.html">Local review library</a></header>
     <section class="setup-hero"><span class="overline">Fudge + ND account</span><h1>One account. Both apps.</h1><p>Use the same email and password in Fudge and the ND dashboard. Verify your email before signing in. Local reviews and Sheets stay unchanged; uploads remain off.</p></section>
-    <p class="setup-note" id="backendStatus" role="status" aria-live="polite">Checking saved state…</p>
+    <p class="setup-status" id="backendStatus" role="status" aria-live="polite" data-state="checking">Checking saved state…</p>
     <div class="setup-grid">
       <section class="setup-card">
         <header class="setup-card__head"><span class="setup-step">1</span><h2>Sign in to the shared backend</h2></header>
@@ -42,6 +42,7 @@
         <button class="btn btn--primary" id="enableUploads" type="button" disabled>Enable subsequent captures and upload</button>
         <button class="btn btn--ghost" id="pauseUploads" type="button">Pause capture and uploads</button>
         <button class="btn btn--ghost" id="refreshStatus" type="button">Refresh queue status</button>
+        <p class="setup-note" id="queueSummary" role="status" aria-live="polite">Queue status not loaded yet.</p>
         <button class="btn btn--ghost" id="retryUploads" type="button">Retry repairable blocked intents</button>
         <button class="btn btn--ghost" id="drainUploads" type="button">Process one released batch</button>
         <ul class="setup-instructions" id="blockedItems" aria-label="First twenty blocked local intents"></ul>

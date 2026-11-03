@@ -63,7 +63,7 @@
           const refreshed = tokenResponse(value, auth.publishableKey);
           const userId = await verifyUser(refreshed);
           if (userId !== auth.userId) throw new BackendError("permission", "Account identity changed. Sign in again before resuming.");
-          auth = { ...refreshed, userId };
+          auth = { ...refreshed, userId, email: auth.email || "" };
           await session.set({ fudgeBackendSession: auth });
         } catch (error) {
           if (["auth", "invalid", "permission"].includes(error.code)) await session.remove("fudgeBackendSession");
@@ -99,7 +99,7 @@
           if (recentReceipts.length > 20) recentReceipts.pop();
         }
       }
-      return { ok: true, releaseUploads, releaseCatalog, signedIn: Boolean(auth), userId: auth?.userId || null, enabled: config?.enabled === true,
+      return { ok: true, releaseUploads, releaseCatalog, signedIn: Boolean(auth), userId: auth?.userId || null, email: typeof auth?.email === "string" ? auth.email : "", enabled: config?.enabled === true,
         organizationId: config?.organizationId || null, publishableKey: keyValid(fudgeBackendPublishableKey) ? fudgeBackendPublishableKey : "", counts, blockedItems, recentReceipts,
         state: fudgeBackendStatus.state || "off", reason: fudgeBackendStatus.reason || "" };
     }
@@ -112,6 +112,8 @@
       const value = await request("/auth/v1/token?grant_type=password", { publishableKey }, { email, password });
       const auth = tokenResponse(value, publishableKey);
       auth.userId = await verifyUser(auth);
+      // Kept for the session only, so the setup page can say who is signed in.
+      auth.email = email.trim().toLowerCase();
       const choices = await workspaces(auth);
       await session.set({ fudgeBackendSession: auth });
       // The publishable key is public application identity, not an Auth credential.

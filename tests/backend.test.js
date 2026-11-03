@@ -307,6 +307,11 @@ test("multiple-business sign-in never silently chooses or creates another target
   assert.equal(result.workspaces.length, 2);
   assert.equal(f.local.data.fudgeBackendConfig, null);
   assert.ok(!f.calls.some((c) => c.url.includes("/rpc/")));
+  // The setup page names the account it is signed in with.
+  const state = await f.service.status();
+  assert.equal(state.signedIn, true);
+  assert.equal(state.email, "fixture@example.test");
+  assert.equal(state.organizationId, null, "signed in but not connected to a business yet");
 });
 test("unverified email cannot establish a Fudge session or create a business", async () => {
   const f = setup({ signedIn: false }); f.handle(accountHandler({ verified: false }));

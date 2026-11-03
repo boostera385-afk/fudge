@@ -6,7 +6,7 @@ const SheetsService = (() => {
   const SERVICE_HEADERS = ["Service Keyword", "Status", "Reviews Collected", "Notes", "Search Term", "Business Name Keywords", "Review Keywords", "Required Review Keywords", "Google Filter Keywords", "Exclude Keywords", "Service Family", "Subcategory", "Topic Filter Required", "Collect Family Reviews", "Rewrite Service Phrase", "Equivalent Service Phrases"];
   // The connector lives inside the user's spreadsheet, so it can be older than the
   // extension. Anything above version 1 knows about the Cities and Services tabs.
-  const REQUIRED_CONNECTOR_VERSION = 43;
+  const REQUIRED_CONNECTOR_VERSION = 44;
   // The selected tab limit controls how many distinct keywords the Sheet returns.
   const DEFAULT_PARALLEL_JOBS = 3;
   const MAX_PARALLEL_JOBS = 6;
@@ -594,11 +594,26 @@ const SheetsService = (() => {
       const localById = new Map(localReviews.map((review) => [review.id, review]));
       reviewById.forEach((entry, id) => {
         const originalLinks = splitLinks(entry.row[9]).join("\n");
-        const driveLinks = splitLinks(entry.row[10]).map((link) => Fudge.driveShareLink(link)).filter(Boolean).join("\n");
+        // A review is usually appended before its pictures finish uploading, so
+        // the Drive links arrive in the library later. Carry them into the row;
+        // otherwise Drive Picture Links, and every Structure row filled from it,
+        // stays empty for good.
+        const localDrive = (localById.get(id)?.drivePhotos || []).map((photo) => Fudge.driveShareLink(photo?.shareLink || photo?.id || photo?.viewLink || photo?.directLink || "")).filter(Boolean);
+        const sheetDrive = splitLinks(entry.row[10]).map((link) => Fudge.driveShareLink(link)).filter(Boolean);
+        const driveLinks = (localDrive.length > sheetDrive.length ? localDrive : sheetDrive).join("\n");
+        // The connector copies pictures to Drive itself when this library could
+        // not. Adopt those links so the catch-up upload does not copy them again.
+        const owner = localById.get(id);
+        if (owner && sheetDrive.length > localDrive.length) {
+          owner.drivePhotos = (owner.photos || []).map((_url, index) => sheetDrive[index]
+            ? { id: Fudge.driveFileId(sheetDrive[index]), shareLink: sheetDrive[index] }
+            : owner.drivePhotos?.[index] || null);
+          owner.adoptedDrivePhotos = true;
+        }
         if (entry.row[9] !== originalLinks || entry.row[10] !== driveLinks) {
           entry.row[9] = originalLinks;
           entry.row[10] = driveLinks;
-          updates.push({ range: `Reviews!J${entry.rowNumber}:K${entry.rowNumber}`, values: [[originalLinks, driveLinks]] });
+          if (entry.rowNumber) updates.push({ range: `Reviews!J${entry.rowNumber}:K${entry.rowNumber}`, values: [[originalLinks, driveLinks]] });
         }
         const local = localById.get(id);
         if (!local) return;
@@ -724,11 +739,12 @@ const SheetsService = (() => {
         state.row[10] = now();
       });
 
-      // Rows filled before this change hold the scraped googleusercontent URL, or
-      // an older Drive shape. Whenever the review behind a row has Drive links, the
-      // cell is brought into line. Rows whose pictures never reached Drive are left
-      // exactly as they are rather than emptied.
-      structureState.filter((state) => state.row[8]).forEach((state) => {
+      // Picture Links hold Drive links only. Rows filled by older builds may hold
+      // the scraped googleusercontent URL or an older Drive shape: whenever the
+      // review behind a row has Drive links the cell is changed to them. Until
+      // the Drive copy exists (the connector makes it) the cell is left alone
+      // rather than emptied.
+      structureState.filter((state) => state.row[8] && state.mode === "photo").forEach((state) => {
         const item = inventory.find((candidate) => candidate.id === state.row[8]);
         if (!item || !item.driveLinks.length) return;
         const links = item.driveLinks.join(String.fromCharCode(10));
@@ -736,10 +752,19 @@ const SheetsService = (() => {
       });
       const unfilled = structureState.filter((state) => !state.row[8] && !state.row[4]);
       unfilled.forEach((requirement) => {
-        const candidate = inventory.find((item) => itemMatches(item, requirement) && !inventoryIdentityKeys(item).some((key) => claimedReviewKeys.has(key)));
+        const usable = (item) => itemMatches(item, requirement) && !inventoryIdentityKeys(item).some((key) => claimedReviewKeys.has(key));
+        // A picture row is filled only from a review whose pictures are in Drive,
+        // so the cell never receives a Google link. Until one is, the row waits;
+        // the connector copies pending pictures to Drive on its own runs.
+        const candidate = requirement.mode === "photo"
+          ? inventory.find((item) => usable(item) && item.driveLinks.length)
+          : inventory.find(usable);
         // Already waiting and still waiting is not a change. Stamping it every
         // minute is what made Updated At churn on rows nobody had touched.
-        if (!candidate) { requirement.row[7] = "Waiting for reviews"; return; }
+        if (!candidate) {
+          requirement.row[7] = requirement.mode === "photo" && inventory.some(usable) ? "Waiting for Drive pictures" : "Waiting for reviews";
+          return;
+        }
         inventoryIdentityKeys(candidate).forEach((key) => { claimedReviewKeys.add(key); claimedOwners.set(key, candidate.id); });
         candidate.status = "used"; candidate.row[11] = "Used"; candidate.row[12] = now(); candidate.row[13] = requirement.requestId;
         requirement.row[4] = candidate.text;
@@ -846,10 +871,17 @@ const SheetsService = (() => {
           releasedAt: review.releasedAt || null,
           requestId: review.requestId || ""
         }]));
+        const adoptedDrive = new Map(localReviews.filter((review) => review.adoptedDrivePhotos).map((review) => [review.id, review.drivePhotos]));
+        const driveCount = (photos) => (photos || []).filter((photo) => photo?.id).length;
         const latestReviews = await Fudge.getReviews();
-        const reconciled = latestReviews.map((review) => statusById.has(review.id)
-          ? { ...review, ...statusById.get(review.id) }
-          : review);
+        const reconciled = latestReviews.map((review) => {
+          if (!statusById.has(review.id)) return review;
+          const merged = { ...review, ...statusById.get(review.id) };
+          // Drive links the Sheet supplied win only over a library that has fewer.
+          const adopted = adoptedDrive.get(review.id);
+          if (adopted && driveCount(adopted) > driveCount(review.drivePhotos)) merged.drivePhotos = adopted;
+          return merged;
+        });
         await Fudge.saveReviews(reconciled);
       }
       const isExhausted = (key) => Fudge.normalize(progressByKey.get(key)?.row[6]) === "yes";

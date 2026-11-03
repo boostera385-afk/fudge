@@ -1419,6 +1419,11 @@ label.list-row__text { cursor: pointer; }
 .setup-card__head { display: flex; align-items: center; gap: var(--s-3); }
 .setup-card__head h2, .connection-card h2 { margin-top: 2px; font-size: var(--fs-heading); }
 .setup-card > p, .setup-note, .connection-card p { color: var(--text-2); font-size: var(--fs-body-sm); line-height: var(--lh-relaxed); }
+/* The sign-in banner: green when connected, amber when half-way, red on an error. */
+.setup-status { padding: var(--s-3) var(--s-4); border: 1px solid var(--line-2); border-left-width: 4px; border-radius: var(--r-sm); background: var(--surface); color: var(--text); font-size: var(--fs-body-sm); font-weight: 600; line-height: var(--lh-relaxed); }
+.setup-status[data-state="ok"] { border-left-color: var(--ok); }
+.setup-status[data-state="partial"] { border-left-color: var(--warn); }
+.setup-status[data-state="error"] { border-left-color: var(--danger); }
 .setup-step { display: grid; flex: none; place-items: center; width: 36px; height: 36px; border: 1px solid var(--ink); border-radius: var(--r-full); background: var(--lime); color: var(--ink); font-family: var(--font-display); font-weight: 700; }
 .copy-field { display: grid; grid-template-columns: minmax(0, 1fr) 34px; align-items: center; gap: var(--s-2); padding: var(--s-2) var(--s-2) var(--s-2) var(--s-3); border: 1px solid var(--line); border-radius: var(--r-sm); background: var(--surface-3); }
 .copy-field code { overflow: hidden; color: var(--text-2); font-family: var(--font-mono); font-size: var(--fs-caption); text-overflow: ellipsis; white-space: nowrap; user-select: all; }

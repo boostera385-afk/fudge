@@ -1,7 +1,15 @@
 "use strict";
 const field = (id) => document.getElementById(id);
 let busy = false;
-function message(text) { field("backendStatus").textContent = text; }
+function message(text, state = "error") { field("backendStatus").textContent = text; field("backendStatus").dataset.state = state; }
+// One plain sentence a person can read at a glance: are they signed in, and is
+// their business connected. Queue numbers live with the queue controls below.
+function connectionMessage(state) {
+  const who = state.email ? ` as ${state.email}` : "";
+  if (!state.signedIn) return { text: "Not signed in. Sign in with your Fudge / ND account to connect.", state: "off" };
+  if (!state.organizationId) return { text: `Signed in${who}. Not connected to a business yet — set up or choose one in step 2.`, state: "partial" };
+  return { text: `Connected. Signed in${who}; your business account is connected.${state.enabled ? "" : " Uploads are off."}`, state: "ok" };
+}
 function clearConnectionCheck() {
   field("connectionResult").textContent = "Not tested for the current selection. Test backend reads explicitly; this never releases uploads.";
   field("catalogResult").textContent = "Catalog preview not checked for this account selection. No cached catalog is applied to collection or Sheets.";
@@ -22,7 +30,9 @@ async function send(type, values = {}) {
 async function refresh() {
   const state = await send("BACKEND_STATUS");
   const counts = state.counts;
-  message(`${state.signedIn ? "Signed in" : "Signed out"} · ${state.enabled ? "enabled" : "paused"} · ${state.signedIn && state.organizationId ? "business connection saved" : "sign in to connect your business"} · pending ${counts.pending} · blocked ${counts.blocked} · acknowledged ${counts.acknowledged} · cancelled ${counts.cancelled} · other targets ${counts.otherTargets}. ${state.reason}`);
+  const connection = connectionMessage(state);
+  message(connection.text, connection.state);
+  field("queueSummary").textContent = `Uploads ${state.enabled ? "enabled" : "paused"} · pending ${counts.pending} · blocked ${counts.blocked} · acknowledged ${counts.acknowledged} · cancelled ${counts.cancelled} · other targets ${counts.otherTargets}. ${state.reason}`;
   field("enableUploads").disabled = !state.releaseUploads;
   field("queueHistory").disabled = !state.releaseUploads;
   field("drainUploads").disabled = !state.releaseUploads;
@@ -59,9 +69,18 @@ function authenticate(type) {
   act(async () => {
     clearConnectionCheck();
     if (!(await permission)) throw new Error("Project network permission was not granted. Nothing was connected.");
-    const result = await send(type, { email: field("email").value.trim(), password });
-    if (type === "BACKEND_SIGN_UP") field("authResult").textContent = result.message;
-    else { choices(result.workspaces); field("authResult").textContent = "Signed in with your shared Fudge / ND account. Uploads remain paused."; }
+    const email = field("email").value.trim();
+    field("authResult").textContent = type === "BACKEND_SIGN_UP" ? "Creating your account…" : "Signing in…";
+    const result = await send(type, { email, password }).catch((error) => {
+      field("authResult").textContent = `${type === "BACKEND_SIGN_UP" ? "Sign-up" : "Sign-in"} failed: ${error.message}`;
+      throw error;
+    });
+    if (type === "BACKEND_SIGN_UP") {
+      field("authResult").textContent = `Sign-up sent for ${email}. Open the verification email, click its link, then come back and press Sign in. ${result.message}`;
+    } else {
+      choices(result.workspaces);
+      field("authResult").textContent = `Signed in as ${email}. ${result.workspaces.length === 1 ? "Your business account is connected." : "Choose or set up your business account in step 2."} Uploads remain paused.`;
+    }
   });
 }
 field("signInForm").addEventListener("submit", (event) => { event.preventDefault(); authenticate("BACKEND_SIGN_IN"); });
@@ -76,7 +95,7 @@ field("refreshCatalog").addEventListener("click", () => act(async () => {
   field("catalogResult").textContent = `Catalog preview: ${result.state}; usable cached preview ${result.available ? "yes" : "no"}; generation ${result.generation ?? "unknown"}, revision ${result.revision ?? "unknown"}, rules ${result.rules}. Not applied to collection or Sheets.`;
 }));
 field("selectWorkspace").addEventListener("click", () => act(async () => { clearConnectionCheck(); await send("BACKEND_SELECT_WORKSPACE", { organizationId: field("workspace").value }); }));
-field("signOut").addEventListener("click", () => act(async () => { clearConnectionCheck(); await send("BACKEND_SIGN_OUT"); choices([]); }));
+field("signOut").addEventListener("click", () => act(async () => { clearConnectionCheck(); await send("BACKEND_SIGN_OUT"); choices([]); field("authResult").textContent = "Signed out. Uploads are paused; sign in again to reconnect."; }));
 field("testConnection").addEventListener("click", () => act(async () => {
   field("connectionResult").textContent = "Checking verified staff access and empty table reads…";
   try {

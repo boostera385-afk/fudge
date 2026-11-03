@@ -487,8 +487,10 @@ async function automationPass({ force = false, interactive = false, activate = f
 let driveUploadBusy = false;
 async function catchUpDriveUploads() {
   if (driveUploadBusy) return;
-  const { saveToDrive = false } = await getLocal({ saveToDrive: false });
-  if (!saveToDrive) return;
+  // The Sheet's picture columns hold Drive links, so pictures are copied to
+  // Drive whenever a Sheet is connected, even if the scan-time toggle is off.
+  const { saveToDrive = false, sheetsDatabase = null } = await getLocal({ saveToDrive: false, sheetsDatabase: null });
+  if (!saveToDrive && !sheetsDatabase?.spreadsheetId) return;
   driveUploadBusy = true;
   try {
     const reviews = await Fudge.getReviews();

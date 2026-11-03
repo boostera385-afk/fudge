@@ -564,12 +564,12 @@ async function testEmptyDriveSelectionUploadsNothing() {
 
 const reviewSheetRow = (id, status = "Unused", text = "They assembled our furniture perfectly") => [
   id, `fingerprint-${id}`, "Installation", "Furniture assembly", "Houston TX", `Business ${id}`, `place-${id}`,
-  text, "With Picture", `https://lh3.googleusercontent.com/${id}=s0`, "", status, status === "Used" ? "2026-10-01T00:00:00.000Z" : "", "", "https://google.com", "2026-10-01T00:00:00.000Z", ""
+  text, "With Picture", `https://lh3.googleusercontent.com/${id}=s0`, `https://drive.google.com/file/d/drive-${id}/view?usp=sharing`, status, status === "Used" ? "2026-10-01T00:00:00.000Z" : "", "", "https://google.com", "2026-10-01T00:00:00.000Z", ""
 ];
 
 const christmasReviewSheetRow = (id, status = "Unused", text = "They installed beautiful Christmas lights along our roofline") => [
   id, `fingerprint-${id}`, "Holiday lighting", "Christmas lights installation", "Houston TX", `Holiday Business ${id}`, `place-${id}`,
-  text, "With Picture", `https://lh3.googleusercontent.com/${id}=s0`, "", status, status === "Used" ? "2026-10-01T00:00:00.000Z" : "", "", "https://google.com", "2026-10-01T00:00:00.000Z", ""
+  text, "With Picture", `https://lh3.googleusercontent.com/${id}=s0`, `https://drive.google.com/file/d/drive-${id}/view?usp=sharing`, status, status === "Used" ? "2026-10-01T00:00:00.000Z" : "", "", "https://google.com", "2026-10-01T00:00:00.000Z", ""
 ];
 
 async function testSheetsPoolAllocation() {
@@ -710,6 +710,7 @@ async function testAppendedReviewIsMarkedOnItsOwnRow() {
         placeName: "Business fresh-review",
         rating: 5,
         photos: ["https://lh3.googleusercontent.com/fresh-review=s0"],
+        drivePhotos: [{ id: "drive-fresh-review", shareLink: "https://drive.google.com/file/d/drive-fresh-review/view?usp=sharing" }],
         reviewMode: "photo",
         searchCity: "Houston TX",
         service: Fudge.classify("furniture assembly")
@@ -889,8 +890,8 @@ function pad(row, length) {
 
 async function testDuplicateReviewCannotFillTwoRows() {
   const structureRows = [
-    ["REQ-2", "With Picture", "Furniture Assembly", "Houston TX", "They assembled our furniture perfectly", "photo", "QC needed", "Filled", "same-review", "Same Business"],
-    ["REQ-3", "With Picture", "Furniture Assembly", "Houston TX", "They assembled our furniture perfectly", "photo", "QC needed", "Filled", "same-review", "Same Business"]
+    ["REQ-2", "With Picture", "Furniture Assembly", "Houston TX", "They assembled our furniture perfectly", "https://drive.google.com/file/d/drive-same-review/view?usp=sharing", "QC needed", "Filled", "same-review", "Same Business"],
+    ["REQ-3", "With Picture", "Furniture Assembly", "Houston TX", "They assembled our furniture perfectly", "https://drive.google.com/file/d/drive-same-review/view?usp=sharing", "QC needed", "Filled", "same-review", "Same Business"]
   ];
   const used = reviewSheetRow("same-review", "Used");
   used[5] = "Same Business";
@@ -2868,12 +2869,15 @@ function testSheetOnlyQueueFillsAndReplaces() {
   const structureRows = [
     ["REQ-2", "With Picture", "Furniture Assembly", "Houston TX", "", "", "", "", "", "", ""],
     ["REQ-3", "With Picture", "Furniture Assembly", "Houston TX", "Old review", "old-link", "Change it", "Filled", "old-review", "Old Business", ""],
-    ["REQ-4", "With Picture", "Roof Repair", "Houston TX", "", "", "", "Waiting for reviews", "", "", ""]
+    ["REQ-4", "With Picture", "Roof Repair", "Houston TX", "", "", "", "Waiting for reviews", "", "", ""],
+    // Filled by an older build with the scraped Google link: changed to Drive.
+    ["REQ-5", "With Picture", "Furniture Assembly", "Houston TX", "They assembled our IKEA bed frame.", "https://lh3.googleusercontent.com/legacy=s0", "Approved", "Filled", "legacy", "Legacy Business", ""]
   ];
   const reviewsRows = [
-    ["new-one", "fp-one", "Installation", "Furniture assembly", "Houston TX", "New Business One", "place-one", "They assembled our IKEA wardrobe.", "With Picture", "original-one", "drive-one", "Unused", "", "", "", "", ""],
+    ["new-one", "fp-one", "Installation", "Furniture assembly", "Houston TX", "New Business One", "place-one", "They assembled our IKEA wardrobe.", "With Picture", "https://lh3.googleusercontent.com/original-one=s0", "https://drive.google.com/file/d/drive-one-0123456789/view?usp=sharing", "Unused", "", "", "", "", ""],
     ["old-review", "fp-old", "Installation", "Furniture assembly", "Houston TX", "Old Business", "place-old", "Old review", "With Picture", "old-link", "", "Used", "old-date", "REQ-3", "", "", ""],
-    ["new-two", "fp-two", "Installation", "Furniture assembly", "Houston TX", "New Business Two", "place-two", "They assembled our dresser and shelves.", "With Picture", "original-two-a\noriginal-two-b", "", "Unused", "", "", "", "", ""]
+    ["new-two", "fp-two", "Installation", "Furniture assembly", "Houston TX", "New Business Two", "place-two", "They assembled our dresser and shelves.", "With Picture", "https://lh3.googleusercontent.com/original-two-a=s0\nhttps://lh3.googleusercontent.com/original-two-b=w400-h300", "", "Unused", "", "", "", "", ""],
+    ["legacy", "fp-legacy", "Installation", "Furniture assembly", "Houston TX", "Legacy Business", "place-legacy", "They assembled our IKEA bed frame.", "With Picture", "https://lh3.googleusercontent.com/legacy=s0", "", "Used", "old-date", "REQ-5", "", "", ""]
   ];
   const makeSheet = (name, rows) => ({
     name,
@@ -2905,10 +2909,25 @@ function testSheetOnlyQueueFillsAndReplaces() {
   const sheets = { Structure: makeSheet("Structure", structureRows), Reviews: makeSheet("Reviews", reviewsRows) };
   const spreadsheet = { getSheetByName: (name) => sheets[name] || null };
   const lock = { waitLock() {}, releaseLock() {} };
+  // new-two's pictures never reached Drive, so the connector copies them there
+  // itself, as JPGs, before the row may be filled.
+  const fetched = [];
+  const created = [];
+  const folder = { getId: () => "folder-1", createFile(blob) {
+    const id = `uploaded-${created.length + 1}-0123456789`;
+    created.push(blob.name);
+    return { getId: () => id, getName: () => blob.name, getUrl: () => `https://drive.google.com/file/d/${id}/view?usp=drivesdk`, setSharing() {} };
+  } };
   const context = {
-    PropertiesService: { getScriptProperties: () => ({ getProperty: (key) => key === "FUDGE_SPREADSHEET_ID" ? "sheet-1" : "" }) },
+    PropertiesService: { getScriptProperties: () => ({ getProperty: (key) => key === "FUDGE_SPREADSHEET_ID" ? "sheet-1" : "", setProperty() {} }) },
     SpreadsheetApp: { openById: () => spreadsheet, flush() {}, WrapStrategy: { CLIP: "CLIP", WRAP: "WRAP", OVERFLOW: "OVERFLOW" } },
-    LockService: { getScriptLock: () => lock }
+    LockService: { getScriptLock: () => lock },
+    UrlFetchApp: { fetch(url) {
+      fetched.push(url);
+      const blob = { name: "", getContentType: () => "image/jpeg", setName(name) { this.name = name; return this; } };
+      return { getResponseCode: () => 200, getBlob: () => blob };
+    } },
+    DriveApp: { getFoldersByName: () => ({ hasNext: () => false }), createFolder: () => folder, getFolderById: () => folder, Access: { ANYONE_WITH_LINK: "ANYONE" }, Permission: { VIEW: "VIEW" } }
   };
   vm.createContext(context);
   vm.runInContext(fs.readFileSync(path.join(root, "apps-script.gs"), "utf8"), context);
@@ -2916,9 +2935,18 @@ function testSheetOnlyQueueFillsAndReplaces() {
   assert.equal(result.filled, 2);
   assert.equal(result.replaced, 1);
   assert.equal(structureRows[0][8], "new-one");
-  assert.equal(structureRows[0][5], "drive-one", "Drive links should be preferred when available");
+  assert.equal(structureRows[0][5], "https://drive.google.com/file/d/drive-one-0123456789/view?usp=sharing", "Drive links should be preferred when available");
   assert.equal(structureRows[1][8], "new-two");
-  assert.equal(structureRows[1][5], "original-two-a\noriginal-two-b", "multiple pictures stay in one cell on separate lines");
+  assert.equal(structureRows[3][5], "https://drive.google.com/file/d/uploaded-1-0123456789/view?usp=sharing",
+    "a filled row's Google link is changed to its Drive link automatically");
+  assert.equal(reviewsRows[3][10], structureRows[3][5]);
+  assert.equal(structureRows[3][6], "Approved", "and nothing else about that row changes");
+  assert.equal(structureRows[1][5], "https://drive.google.com/file/d/uploaded-2-0123456789/view?usp=sharing\nhttps://drive.google.com/file/d/uploaded-3-0123456789/view?usp=sharing",
+    "pictures not yet in Drive are copied there, and the cell holds one Drive link per line");
+  assert.equal(reviewsRows[2][10], structureRows[1][5], "the review keeps its new Drive links too");
+  assert.deepEqual(fetched, ["https://lh3.googleusercontent.com/legacy=s0-rj", "https://lh3.googleusercontent.com/original-two-a=s0-rj", "https://lh3.googleusercontent.com/original-two-b=w400-h300-rj"], "pictures are downloaded as JPEG");
+  assert.ok(created.length === 3 && created.every((name) => /\.jpg$/.test(name)), "and saved to Drive as .jpg");
+  assert.ok(structureRows.every((row) => !/googleusercontent/.test(row[5])), "Picture Links never carry a Google link");
   assert.equal(structureRows[1][6], "QC needed");
   assert.equal(reviewsRows[0][11], "Used");
   assert.equal(reviewsRows[1][11], "Rejected");

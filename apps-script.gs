@@ -7,13 +7,16 @@ const FUDGE_SECRET = "__FUDGE_SECRET__";
 // Bumped whenever this connector's required behavior changes. Fudge reads it from
 // every response so it can tell you when the copy inside your Sheet is older than
 // the extension expects, instead of failing with an unhelpful error.
-const FUDGE_CONNECTOR_VERSION = 43;
+const FUDGE_CONNECTOR_VERSION = 44;
 const FUDGE_WRITER_PROMPT_VERSION = 23;
 const FUDGE_DEFAULT_MALE_NAMES = ["James", "Michael", "Daniel", "David", "Matthew", "Ryan", "Jason", "Andrew", "Brian", "Kevin"];
 const FUDGE_CTA_TEMPLATE_COUNT = 12;
 // How many rows one instant rephrase may send. Beyond this the remainder is picked
 // up by the next pass, so pasting a hundred rows cannot stall a single request.
 const FUDGE_INSTANT_REPHRASE_LIMIT = 10;
+// Reviews whose pictures the queue copies to Drive itself in one run. Each costs
+// a download and an upload per picture, so a backlog is worked off a few a minute.
+const FUDGE_QUEUE_DRIVE_UPLOADS = 5;
 // Apps Script stops a request after six minutes, so the instant path keeps going
 // for at most this many batches and leaves any remainder to the next pass.
 const FUDGE_INSTANT_REPHRASE_PASSES = 3;
@@ -1950,6 +1953,15 @@ function queueLinks_(value) {
   return String(value || "").split(/\r?\n|\|/).map(function (item) { return item.trim(); }).filter(Boolean);
 }
 
+// Picture Links carry Drive sharing links and nothing else: never the scraped
+// googleusercontent URL the picture came from.
+function queueDriveLinks_(value) {
+  return queueLinks_(value).map(function (link) {
+    const match = link.match(/\/file\/d\/([A-Za-z0-9_-]{10,})/) || link.match(/[?&]id=([A-Za-z0-9_-]{10,})/);
+    return /drive\.google\.com/i.test(link) && match ? "https://drive.google.com/file/d/" + match[1] + "/view?usp=sharing" : "";
+  }).filter(Boolean);
+}
+
 function queueReviewMatches_(review, requirement) {
   if (queueNormalize_(review.row[11]) !== "unused") return false;
   if (queueMode_(review.row[8]) !== requirement.mode) return false;
@@ -2038,14 +2050,85 @@ function processQueue_(sourceSpreadsheet) {
     if (assigned) queueIdentityKeys_(assigned).forEach(function (key) { claimed[key] = true; });
   });
 
+  // A review whose pictures never reached Drive (the upload failed, or it was
+  // collected on another machine) is copied there from its original links here,
+  // so a picture row is never filled with a Google link. The queue already holds
+  // the script lock, so the folder is opened directly rather than through
+  // uploadPhotos_, which takes the lock itself.
+  let driveBudget = FUDGE_QUEUE_DRIVE_UPLOADS;
+  let driveFolder = null;
+  const copyToDrive = function (urls, meta) {
+    const originals = urls.filter(function (link) { return /^https:\/\//i.test(link) && !/drive\.google\.com/i.test(link); });
+    if (!originals.length || driveBudget <= 0) return [];
+    driveBudget -= 1;
+    try {
+      driveFolder = driveFolder || driveFolder_();
+      const result = uploadPhotosTo_(driveFolder, originals.map(function (url, index) {
+        return { key: meta.id + ":" + index, url: url, reviewId: meta.id, index: index, placeName: meta.business, service: meta.service };
+      }));
+      return result.files.map(function (file) { return file.shareLink; });
+    } catch (_error) {
+      return [];
+    }
+  };
+  const ensureDriveLinks = function (review) {
+    const existing = queueDriveLinks_(review.row[10]);
+    if (existing.length) return existing;
+    const links = copyToDrive(queueLinks_(review.row[9]), { id: review.row[0], business: review.row[5], service: review.row[2] });
+    if (!links.length) return [];
+    review.row[10] = links.join("\n");
+    changedReviews[review.rowNumber] = review.row;
+    return links;
+  };
+  const hasDrivePictures = function (review) { return queueDriveLinks_(review.row[10]).length > 0; };
+
+  // A filled picture row holding a Google link has it changed to the Drive link
+  // automatically: from the review's Drive copy, made now if needed, or, when the
+  // review is not in the Reviews tab, by copying the cell's own pictures. The
+  // cell keeps what it has until the Drive copy exists, so it is never blanked.
+  requirements.forEach(function (requirement) {
+    if (requirement.mode !== "photo" || !requirement.row[8]) return;
+    const assigned = byId[requirement.row[8]] || null;
+    const current = queueLinks_(requirement.row[5]);
+    const currentDrive = queueDriveLinks_(requirement.row[5]);
+    const reviewDrive = assigned ? queueDriveLinks_(assigned.row[10]) : [];
+    const allDrive = current.length > 0 && current.length === currentDrive.length;
+    if (allDrive && (!reviewDrive.length || currentDrive.join("\n") === reviewDrive.join("\n"))) return;
+    let drive = assigned ? ensureDriveLinks(assigned) : [];
+    if (!drive.length && !allDrive) drive = copyToDrive(current, { id: requirement.row[8], business: requirement.row[9], service: requirement.row[2] });
+    if (!drive.length) return;
+    const next = drive.join("\n");
+    if (next === current.join("\n")) return;
+    requirement.row[5] = next;
+    requirement.row[10] = new Date();
+    changedStructure[requirement.rowNumber] = requirement.row;
+  });
+
   requirements.forEach(function (requirement) {
     if (requirement.row[8] || requirement.row[4]) return;
-    const candidate = inventory.find(function (review) {
+    const usable = function (review) {
       return queueReviewMatches_(review, requirement) && !queueIdentityKeys_(review).some(function (key) { return claimed[key]; });
-    });
+    };
+    // A picture row is only ever filled with Drive links. Reviews already in
+    // Drive go first; otherwise the first match is copied to Drive now, and if
+    // that cannot happen the row waits rather than take a Google link.
+    let candidate = null;
+    let waiting = "Waiting for reviews";
+    if (requirement.mode === "photo") {
+      candidate = inventory.find(function (review) { return usable(review) && hasDrivePictures(review); }) || null;
+      if (!candidate) {
+        const pending = inventory.filter(usable);
+        if (pending.length) waiting = "Waiting for Drive pictures";
+        for (let i = 0; i < pending.length && !candidate && driveBudget > 0; i += 1) {
+          if (ensureDriveLinks(pending[i]).length) candidate = pending[i];
+        }
+      }
+    } else {
+      candidate = inventory.find(usable) || null;
+    }
     if (!candidate) {
-      if (requirement.row[7] !== "Waiting for reviews") {
-        requirement.row[7] = "Waiting for reviews";
+      if (requirement.row[7] !== waiting) {
+        requirement.row[7] = waiting;
         requirement.row[10] = new Date();
         changedStructure[requirement.rowNumber] = requirement.row;
       }
@@ -2053,13 +2136,21 @@ function processQueue_(sourceSpreadsheet) {
     }
     queueIdentityKeys_(candidate).forEach(function (key) { claimed[key] = true; });
     const now = new Date();
-    const pictures = queueLinks_(candidate.row[10]).length ? queueLinks_(candidate.row[10]) : queueLinks_(candidate.row[9]);
+    const pictures = requirement.mode === "photo" ? queueDriveLinks_(candidate.row[10]) : queueLinks_(candidate.row[9]);
     candidate.row[11] = "Used"; candidate.row[12] = now; candidate.row[13] = requirement.row[0];
     requirement.row[4] = candidate.row[7]; requirement.row[5] = pictures.join("\n"); requirement.row[6] = "QC needed";
     requirement.row[7] = "Filled"; requirement.row[8] = candidate.row[0]; requirement.row[9] = candidate.row[5]; requirement.row[10] = now;
     changedReviews[candidate.rowNumber] = candidate.row;
     changedStructure[requirement.rowNumber] = requirement.row;
     filled += 1;
+  });
+
+  // Uploads left over in this run copy unused picture reviews to Drive ahead of
+  // time, so the Reviews tab's Google-only rows are converted as well and the
+  // next picture row can be filled straight away.
+  inventory.forEach(function (review) {
+    if (driveBudget <= 0 || queueNormalize_(review.row[11]) !== "unused" || queueMode_(review.row[8]) !== "photo") return;
+    ensureDriveLinks(review);
   });
 
   Object.keys(changedReviews).forEach(function (rowNumber) {
@@ -2195,21 +2286,34 @@ function safeName_(value) {
   return String(value || "review").replace(/[^a-z0-9 _.-]+/gi, "").trim().slice(0, 80) || "review";
 }
 
+function jpegPhotoUrl_(url) {
+  const text = String(url || "");
+  if (!/googleusercontent\.com/i.test(text)) return text;
+  return /=[^/=]*$/.test(text) ? text.replace(/=([^/=]*)$/, function (_match, options) { return "=" + (/(^|-)rj(-|$)/.test(options) ? options : (options ? options + "-rj" : "s0-rj")); }) : text + "=s0-rj";
+}
+
 function uploadPhotos_(photos) {
   // Only finding or creating the folder needs the lock, so two uploads arriving
   // together cannot each create their own "Fudge Reviews" folder.
   const folder = withLock_(function () { return driveFolder_(); });
+  return uploadPhotosTo_(folder, photos);
+}
+
+function uploadPhotosTo_(folder, photos) {
   const files = [];
   const errors = [];
   photos.slice(0, 10).forEach(function (photo) {
     try {
       if (!/^https:\/\//i.test(photo.url || "")) throw new Error("Invalid image URL.");
-      const response = UrlFetchApp.fetch(photo.url, { followRedirects: true, muteHttpExceptions: true });
+      // Every picture lands in Drive as a JPG. Google's image server encodes JPEG
+      // when the size option carries "-rj"; anything else is converted here.
+      const response = UrlFetchApp.fetch(jpegPhotoUrl_(photo.url), { followRedirects: true, muteHttpExceptions: true });
       if (response.getResponseCode() < 200 || response.getResponseCode() >= 300) throw new Error("Image download returned " + response.getResponseCode() + ".");
-      const blob = response.getBlob();
-      const contentType = blob.getContentType() || "image/jpeg";
-      const extension = /png/i.test(contentType) ? "png" : /webp/i.test(contentType) ? "webp" : "jpg";
-      blob.setName(safeName_(photo.placeName) + " - " + safeName_(photo.service) + " - " + safeName_(photo.reviewId) + "-" + (Number(photo.index) + 1) + "." + extension);
+      let blob = response.getBlob();
+      if (!/jpe?g/i.test(blob.getContentType() || "")) {
+        try { blob = blob.getAs(MimeType.JPEG); } catch (_error) { throw new Error("Image could not be converted to JPG (" + (blob.getContentType() || "unknown type") + ")."); }
+      }
+      blob.setName(safeName_(photo.placeName) + " - " + safeName_(photo.service) + " - " + safeName_(photo.reviewId) + "-" + (Number(photo.index) + 1) + ".jpg");
       const file = folder.createFile(blob);
       file.setSharing(DriveApp.Access.ANYONE_WITH_LINK, DriveApp.Permission.VIEW);
       // shareLink is what goes into the Sheet: the form people recognise and can
