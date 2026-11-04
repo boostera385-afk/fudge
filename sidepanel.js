@@ -40,7 +40,7 @@ const elements = {
 const escapeHtml = (value = "") => value.replace(/[&<>'"]/g, (char) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", "'": "&#39;", '"': "&quot;" })[char]);
 const icon = (name, extra = "") => `<svg class="icon icon--sm ${extra}"><use href="#i-${name}" /></svg>`;
 const setLabel = (button, text) => { (button.querySelector("[data-label]") || button).textContent = text; };
-const openDashboard = () => chrome.runtime.sendMessage({ type: "OPEN_DASHBOARD" });
+const openDashboard = () => send({ type: "OPEN_DASHBOARD" });
 // Mirrors the one switch in background.js. Only the Start and Stop buttons change
 // it, so the panel and the service worker can never disagree about whether Fudge
 // is collecting.
@@ -56,6 +56,26 @@ function showToast(message, variant = "info") {
   clearTimeout(toastTimer);
   toastTimer = setTimeout(() => elements.toast.classList.remove("show"), 4200);
 }
+
+/* The background service worker can be gone while this panel stays open — the
+   extension was reloaded or updated, or its worker failed to start. Every message
+   then fails with "Could not establish connection. Receiving end does not exist",
+   visible only in the console, so the panel kept showing the last healthy picture
+   while every button silently did nothing. Detect it once and say how to recover. */
+let workerDead = false;
+function reportWorkerDead() {
+  if (!workerDead) {
+    workerDead = true;
+    setState("error", { label: "Fudge needs a reload", source: "Fudge's background worker is not answering — the extension was probably just reloaded or updated. Close and reopen this panel; if it stays, press Reload on Fudge at chrome://extensions." });
+  }
+  showToast("Fudge's background worker is not answering — close and reopen this panel; reload the extension if it stays.", "error");
+}
+// One wrapper for every panel→worker message. A dead worker is reported once and
+// answered with null; any other failure still reaches the caller's own handling.
+const send = (message) => chrome.runtime.sendMessage(message).catch((error) => {
+  if (/receiving end does not exist|could not establish connection|extension context invalidated|message port closed/i.test(String(error?.message || error))) { reportWorkerDead(); return null; }
+  throw error;
+});
 
 /* A single source of truth for the card's appearance.
    state: idle | ready | running | done | error
@@ -111,7 +131,7 @@ function renderJob(job) {
 // valid /exec URL and the shared secret. sheets.js decides this; nothing in the UI
 // may second-guess it, or the panel says "Connected" while requests fail.
 async function sheetsReady() {
-  const status = await chrome.runtime.sendMessage({ type: "GET_SHEETS_STATUS" }).catch(() => null);
+  const status = await send({ type: "GET_SHEETS_STATUS" }).catch(() => null);
   return Boolean(status?.ok && status.connectionReady);
 }
 
@@ -213,8 +233,12 @@ async function render() {
     driveUploadError: "",
     sheetsStatus: null
   });
-  const verified = await chrome.runtime.sendMessage({ type: "GET_RUN_STATE" }).catch(() => null);
+  const verified = await send({ type: "GET_RUN_STATE" }).catch(() => null);
+  // The worker cannot answer, so nothing in storage is current. Leave the reload
+  // instruction on screen instead of painting the last healthy picture over it.
+  if (workerDead) return;
   const sheetsConnected = await sheetsReady();
+  if (workerDead) return;
   if (revision !== renderRevision) return;
   runState = (verified?.ok ? verified.runState : meta.runState) === "running" ? "running" : "stopped";
   elements.saved.textContent = readyReviews.length;
@@ -296,10 +320,11 @@ elements.connectSheets.addEventListener("click", async () => {
   setLabel(elements.connectSheets, connected ? "Syncing…" : "Opening…");
   try {
     if (!connected) {
-      await chrome.runtime.sendMessage({ type: "OPEN_SHEETS_SETUP" });
+      await send({ type: "OPEN_SHEETS_SETUP" });
       showToast("Follow the two-step setup in the new tab.");
     } else {
-      const result = await chrome.runtime.sendMessage({ type: "RUN_SHEETS_SYNC", force: true, interactive: true });
+      const result = await send({ type: "RUN_SHEETS_SYNC", force: true, interactive: true });
+      if (result === null) return;
       if (!result?.ok) showToast(result?.error || "Could not sync Google Sheets.", "error");
       else showToast("Checking the Sheet now. Progress appears here shortly.");
     }
@@ -314,7 +339,7 @@ elements.connectSheets.addEventListener("click", async () => {
 // Once a sheet was connected the Connect button turned into "Sync now", which left
 // no way back to the setup page to link a different sheet or disconnect.
 document.querySelector("#relinkSheets").addEventListener("click", async () => {
-  await chrome.runtime.sendMessage({ type: "OPEN_SHEETS_SETUP" });
+  await send({ type: "OPEN_SHEETS_SETUP" });
   showToast("Paste a different connector URL, or disconnect, in the new tab.");
 });
 
@@ -325,7 +350,8 @@ const runSheetAction = async (button, label, type, describe) => {
   const previous = (button.querySelector("[data-label]") || button).textContent;
   setLabel(button, label);
   try {
-    const result = await chrome.runtime.sendMessage({ type });
+    const result = await send({ type });
+    if (result === null) return;
     if (!result?.ok) showToast(result?.error || "The Sheet could not run that just now. Fudge will keep trying on its own.", "error");
     else showToast(describe(result));
   } catch (error) {
@@ -361,7 +387,8 @@ elements.repairAutomation.addEventListener("click", async () => {
   elements.repairAutomation.disabled = true;
   setLabel(elements.repairAutomation, "Repairing…");
   try {
-    const result = await chrome.runtime.sendMessage({ type: "REPAIR_SHEET_AUTOMATION" });
+    const result = await send({ type: "REPAIR_SHEET_AUTOMATION" });
+    if (result === null) return;
     if (!result?.ok) showToast(result?.error || "Could not reinstall the Sheet's automation.", "error");
     else if (result.automation?.queueTrigger && result.automation?.rephraseTrigger) showToast("Automatic rephrasing is installed.");
     else showToast("The Sheet would not let Fudge install its triggers. Open it and run Fudge → Install automatic rephrasing.", "error");
@@ -373,7 +400,8 @@ elements.repairAutomation.addEventListener("click", async () => {
 });
 
 elements.openSheet.addEventListener("click", async () => {
-  const result = await chrome.runtime.sendMessage({ type: "OPEN_SHEETS_DATABASE" });
+  const result = await send({ type: "OPEN_SHEETS_DATABASE" });
+  if (result === null) return;
   if (!result?.ok) showToast(result?.error || "Could not open the Fudge database.", "error");
 });
 
@@ -384,7 +412,8 @@ elements.pageSelect.addEventListener("change", async () => {
 elements.parallelSelect.addEventListener("change", async () => {
   elements.parallelSelect.disabled = true;
   try {
-    const result = await chrome.runtime.sendMessage({ type: "SET_PARALLEL_TABS", count: Number(elements.parallelSelect.value) });
+    const result = await send({ type: "SET_PARALLEL_TABS", count: Number(elements.parallelSelect.value) });
+    if (result === null) return;
     if (!result?.ok) showToast(result?.error || "Could not change the Google tab limit.", "error");
     else showToast(`Fudge will use up to ${result.parallelTabs} Google tab${result.parallelTabs === 1 ? "" : "s"}.`);
   } catch (error) {
@@ -400,7 +429,7 @@ elements.saveToDrive.addEventListener("change", async () => {
     const { sheetsDatabase, appsScriptUrl } = await chrome.storage.local.get({ sheetsDatabase: null, appsScriptUrl: "" });
     if (sheetsDatabase?.connector !== "apps-script" || !appsScriptUrl) {
       elements.saveToDrive.checked = false;
-      await chrome.runtime.sendMessage({ type: "OPEN_SHEETS_SETUP" });
+      await send({ type: "OPEN_SHEETS_SETUP" });
       showToast("Connect the easy Sheets and Drive connector first.");
       return;
     }
@@ -410,7 +439,7 @@ elements.saveToDrive.addEventListener("change", async () => {
 });
 
 elements.connectDrive.addEventListener("click", async () => {
-  await chrome.runtime.sendMessage({ type: "OPEN_SHEETS_SETUP" });
+  await send({ type: "OPEN_SHEETS_SETUP" });
 });
 
 elements.collect.addEventListener("click", async () => {
@@ -431,7 +460,8 @@ elements.collect.addEventListener("click", async () => {
       // whenever the user happened to have Google open.
       setState("running", { label: "Starting", source: "Reading Sheet requirements…" });
       elements.progStage.textContent = "Checking requirements";
-      const started = await chrome.runtime.sendMessage({ type: "START_NEXT_JOB", pageLimit });
+      const started = await send({ type: "START_NEXT_JOB", pageLimit });
+      if (started === null) return;
       if (started?.runState) runState = started.runState;
       if (!started?.ok) {
         // Fudge is switched on even when this first attempt found nothing to open,
@@ -463,7 +493,7 @@ elements.stop.addEventListener("click", async () => {
   setLabel(elements.stop, "Stopping…");
   let result = null;
   try {
-    result = await chrome.runtime.sendMessage({ type: "STOP_SCAN_JOB" });
+    result = await send({ type: "STOP_SCAN_JOB" });
   } catch (error) {
     // The worker can be asleep or the channel closed. The button must not stay
     // on "Stopping…" forever; the next interaction revives the worker and the
@@ -508,14 +538,14 @@ document.querySelector("#confirmClearUnused").addEventListener("click", async ()
 });
 
 chrome.storage.onChanged.addListener((changes, area) => {
-  if (area !== "local") return;
+  if (area !== "local" || workerDead) return;
   if (changes.scanJob && !changes.runState) renderJob(changes.scanJob.newValue);
   const liveCount = (jobs) => Object.values(jobs || {}).filter((job) => job?.status === "running").length;
   if (changes.reviews || changes.duplicatesBlocked || changes.sheetsDatabase || changes.appsScriptUrl || changes.runState || changes.sheetsStatus || changes.driveUploadError || changes.parallelTabs || changes.blockedUntil ||
     (changes.scanJobs && liveCount(changes.scanJobs.newValue) !== liveCount(changes.scanJobs.oldValue))) render();
 });
 
-chrome.tabs.onActivated.addListener(() => { if (elements.card.dataset.state !== "running") detectPage(); });
-chrome.tabs.onUpdated.addListener((_id, info) => { if (info.url && elements.card.dataset.state !== "running") detectPage(); });
+chrome.tabs.onActivated.addListener(() => { if (!workerDead && elements.card.dataset.state !== "running") detectPage(); });
+chrome.tabs.onUpdated.addListener((_id, info) => { if (!workerDead && info.url && elements.card.dataset.state !== "running") detectPage(); });
 
 render();

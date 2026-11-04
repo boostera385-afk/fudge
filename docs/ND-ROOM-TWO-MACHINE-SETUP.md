@@ -97,6 +97,7 @@ is not required for scraping and is not configured by this runbook.
 | *"Held back: … kept failing on the same Google page. Press Start to try it again, or Sync now after checking it."* | The same keyword/city failed three rounds in a row on a dead page; unattended passes stopped retrying it. | Check Google for that keyword/city manually, then press **Start** or **Sync now** — human-triggered passes always get one more attempt. A run that saves reviews or finishes normally clears the hold by itself. |
 | *"Google asked Fudge to slow down…"* (cooldown) | Google served a block page; all tab creation pauses 15–120 minutes. | Wait; consider lowering Google tabs in Scan settings. |
 | *"Sheet check stalled — Press Sync now"** | The last sync attempt is older than 5 minutes while collecting. | Press **Sync now**. |
+| **Fudge needs a reload** / buttons do nothing, console shows `Could not establish connection. Receiving end does not exist` | The extension was reloaded or updated while the panel was open; the open panel lost its background worker. | Close and reopen the side panel; if it persists, press **Reload** on Fudge at `chrome://extensions`, close any old Google runner tabs, then Start again. |
 | *"Needs attention: …"* | The sync failed with an action-required error (auth, 404, secret mismatch, missing tab). | Follow the message; see the 404/secret table above. |
 
 ## 5. Why unattended runs no longer stall

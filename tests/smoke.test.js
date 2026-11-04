@@ -4397,6 +4397,21 @@ async function testDifferentSheetDropsPreviousCaches() {
   assert.equal(other.data.runState, "running");
 }
 
+// A reloaded or updated extension leaves the old side panel open with no working
+// background listener: every message failed with "Could not establish connection.
+// Receiving end does not exist" in the console while the panel kept painting the
+// last healthy picture and every button — Change sheet included — did nothing.
+// The panel must name the dead worker and how to recover, not impersonate health.
+function testDeadSidePanelNamesTheDeadWorker() {
+  const panel = fs.readFileSync(path.join(root, "sidepanel.js"), "utf8");
+  assert.match(panel, /const send = \(message\) => chrome\.runtime\.sendMessage\(message\)/, "panel messages need one wrapper that can spot a dead worker");
+  assert.match(panel, /receiving end does not exist/i, "the dead-worker signature must be recognised");
+  assert.match(panel, /reportWorkerDead/, "a dead worker must be reported, not swallowed");
+  assert.match(panel, /if \(workerDead\) return;/, "stale health must not be painted over the reload instruction");
+  const directCalls = (panel.match(/chrome\.runtime\.sendMessage/g) || []).length;
+  assert.equal(directCalls, 1, `every panel message must go through the send wrapper, found ${directCalls} direct calls`);
+}
+
 (async () => {
   const tests = [
     ["used data isolation", testUsedDataIsolation],
@@ -4541,7 +4556,8 @@ async function testDifferentSheetDropsPreviousCaches() {
     ["Structure failure keeps copy and backs off", testStructureFailureKeepsCopyAndBacksOff],
     ["Structure batch limit keeps waiting copy", testStructureBatchLimitNeverClearsWaitingRows],
     ["Sheet-only queue fills and replaces", testSheetOnlyQueueFillsAndReplaces],
-    ["keyword does not claim other-trade reviews", testKeywordDoesNotClaimOtherTradeReviews]
+    ["keyword does not claim other-trade reviews", testKeywordDoesNotClaimOtherTradeReviews],
+    ["dead side panel names the dead worker", testDeadSidePanelNamesTheDeadWorker]
   ];
   let failed = 0;
   for (const [name, run] of tests) {

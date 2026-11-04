@@ -765,3 +765,37 @@ else. Not the scraped `lh3.googleusercontent.com/...` URL, not
 
 *Original Picture Links* still holds the scraped URLs. That column is the record of
 where a picture came from, not a link to hand out.
+
+---
+
+## Q. A silent side panel after a reload (2.0.2)
+
+**Observed:** after the extension was reloaded or updated, the side panel stayed
+open and kept showing the last healthy picture — Connected, On, *Checking Sheet
+requirements…* — while every button, Change sheet included, did nothing. Console:
+`Uncaught (in promise) Error: Could not establish connection. Receiving end does
+not exist.` With no background listener left, nothing collected, nothing synced,
+and the Sheet sat on *Waiting for reviews*.
+
+**Cause.** Reloading or updating the extension destroys the running background
+worker, and the already-open panel's `chrome.runtime` context with it. Every
+message then fails invisibly, and the panel — which renders from storage — painted
+the stale healthy state on top (`sidepanel.js` `render()` used to treat
+`sendMessage` failure as "no answer" and carried on).
+
+**Fixed.**
+
+- One `send()` wrapper for every panel→worker message. The dead-worker signature
+  (*Receiving end does not exist* / *could not establish connection* / *extension
+  context invalidated*) is caught once, reported as **Fudge needs a reload** with
+  the recovery steps, and answered with `null`; every other failure still reaches
+  the caller's own handling.
+- Once the worker is known dead, `render()` stops painting stored health over the
+  reload instruction, and the storage/tab listeners stand down.
+- Rows already waiting are untouched; recovery is close-and-reopen the panel (or
+  Reload at `chrome://extensions`), then Start — covered by the
+  `dead side panel names the dead worker` test.
+
+Runner tabs from before the reload are still running the old content script, as
+documented in section M — close any Google tabs Fudge had open before pressing
+Start again.
