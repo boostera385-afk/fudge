@@ -2063,9 +2063,14 @@ function processQueue_(sourceSpreadsheet) {
     driveBudget -= 1;
     try {
       driveFolder = driveFolder || driveFolder_();
-      const result = uploadPhotosTo_(driveFolder, originals.map(function (url, index) {
+      // Links are written position by position, so a partial upload must not be
+      // reported at all: if the first picture failed, its slot would receive the
+      // second picture's Drive link and the Sheet would show the wrong image.
+      const batch = originals.slice(0, 10);
+      const result = uploadPhotosTo_(driveFolder, batch.map(function (url, index) {
         return { key: meta.id + ":" + index, url: url, reviewId: meta.id, index: index, placeName: meta.business, service: meta.service };
       }));
+      if (result.files.length !== batch.length) return [];
       return result.files.map(function (file) { return file.shareLink; });
     } catch (_error) {
       return [];

@@ -111,6 +111,29 @@ async function scanStrikeHeld(searchKey) {
   return false;
 }
 
+// The five-minute photo grace belongs to a keyword/city, not to one runner tab.
+// Every new job used to seed a fresh clock, so a keyword whose five-star reviews
+// had no photos restarted its grace on each pass, never accepted one, and left its
+// Structure row on "Waiting for reviews" forever. Persist the clock across tabs,
+// page reloads and service-worker restarts instead.
+const GRACE_STORAGE_KEY = "keywordGraceStartedAt";
+async function keywordGraceStartedAt(searchKey) {
+  if (!searchKey) return new Date().toISOString();
+  const { [GRACE_STORAGE_KEY]: stored = {} } = await getLocal({ [GRACE_STORAGE_KEY]: {} });
+  if (stored[searchKey]) return stored[searchKey];
+  const startedAt = new Date().toISOString();
+  await setLocal({ [GRACE_STORAGE_KEY]: { ...stored, [searchKey]: startedAt } });
+  return startedAt;
+}
+async function clearKeywordGrace(searchKey) {
+  if (!searchKey) return;
+  const { [GRACE_STORAGE_KEY]: stored = {} } = await getLocal({ [GRACE_STORAGE_KEY]: {} });
+  if (!stored[searchKey]) return;
+  const next = { ...stored };
+  delete next[searchKey];
+  await setLocal({ [GRACE_STORAGE_KEY]: next });
+}
+
 async function ensureSheetsAlarm() {
   const alarm = await chrome.alarms.get(SHEETS_ALARM);
   if (!alarm || alarm.periodInMinutes !== 0.5) await chrome.alarms.create(SHEETS_ALARM, { delayInMinutes: 0.5, periodInMinutes: 0.5 });
@@ -193,7 +216,18 @@ const recordedScanJobs = async () => {
 // The single answer to "how many runners are really working". A job only counts
 // while its tab is still on Google and its lease is current; everything else is
 // released here, which is what frees the slot again.
-async function liveRunningScanJobs(reason = "Restoring from the saved Sheet checkpoint") {
+//
+// This runs from the alarm, every start and every panel render, so two calls can
+// overlap. Serialize them and re-read the record after the (possibly slow) Sheet
+// checkpoint: a heartbeat may have renewed the lease in the meantime, and marking
+// that live runner interrupted ended a perfectly healthy scan.
+let liveJobsChain = Promise.resolve();
+function liveRunningScanJobs(reason = "Restoring from the saved Sheet checkpoint") {
+  const run = liveJobsChain.catch(() => {}).then(() => computeLiveRunningScanJobs(reason));
+  liveJobsChain = run.catch(() => {});
+  return run;
+}
+async function computeLiveRunningScanJobs(reason) {
   const live = [];
   for (const job of (await recordedScanJobs()).filter((entry) => entry?.status === "running")) {
     if (!leaseExpired(job) && await onLivePlacesTab(job)) { live.push(job); continue; }
@@ -205,7 +239,21 @@ async function liveRunningScanJobs(reason = "Restoring from the saved Sheet chec
     // record here cannot undo newer progress.
     try { if (job.auto) await SheetsService.recordProgress(job, false); }
     catch (_error) { continue; }
-    await updateScanJob({ id: job.id, tabId: job.tabId, status: "interrupted", stage: reason });
+    // The checkpoint can take seconds. Re-read before declaring it dead: the
+    // runner may have heartbeated, finished a navigation, or another pass may have
+    // already ended it. Only a still-lapsed lease on a tab that is still gone is an
+    // interruption.
+    const record = (await recordedScanJobs()).find((entry) => entry?.id === job.id);
+    if (!record) {
+      // The checkpoint write on a sibling released the slot by pruning this stale
+      // record (it is only pruned once its lease has lapsed). Put back the same
+      // interrupted marker the sibling got, so its slot release is recorded too.
+      if (leaseExpired(job)) await updateScanJob({ id: job.id, tabId: job.tabId, status: "interrupted", stage: reason });
+      continue;
+    }
+    if (record.status !== "running") continue;
+    if (!leaseExpired(record) && await onLivePlacesTab(record)) { live.push(record); continue; }
+    await updateScanJob({ id: record.id, tabId: record.tabId, status: "interrupted", stage: reason });
   }
   return live;
 }
@@ -325,7 +373,16 @@ const waitForContentScript = async (tabId, timeout = 25000) => {
   return false;
 };
 
-async function startAutomaticJob(spec, { activate = false, pageLimit = 4 } = {}) {
+// Two quick Start presses (or a Start racing an alarm pass) used to open two tabs
+// for the same keyword, because both checked for a live runner before either job
+// record existed. Starting is serialized so the second call sees the first job.
+let jobStartChain = Promise.resolve();
+function startAutomaticJob(spec, options = {}) {
+  const run = jobStartChain.catch(() => {}).then(() => startAutomaticJobUnlocked(spec, options));
+  jobStartChain = run.catch(() => {});
+  return run;
+}
+async function startAutomaticJobUnlocked(spec, { activate = false, pageLimit = 4 } = {}) {
   if (!await isRunning()) return null;
   // A runner whose tab is gone or whose lease lapsed is not coming back; hand it to
   // the Sheet checkpoint. Only those jobs are rewritten, so a sibling tab still
@@ -356,6 +413,8 @@ async function startAutomaticJob(spec, { activate = false, pageLimit = 4 } = {})
     if (!await isRunning()) throw new Error("Collecting was stopped while Google opened.");
     const options = {
       ...spec,
+      // Continued from storage, not restarted with every new runner tab.
+      keywordStartedAt: spec.keywordStartedAt || await keywordGraceStartedAt(spec.searchKey),
       pageLimit: safePageLimit(pageLimit),
       saveToDrive: saveToDrive && spec.reviewMode === "photo"
     };
@@ -619,7 +678,9 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       // Stop is unconditional. It switches automation off first, so an alarm or a
       // finishing job cannot start anything while the tabs are being closed, and it
       // ends every recorded runner rather than only the mirrored one.
-      await setLocal({ runState: RUN_STATE_STOPPED, sheetsAutomation: false });
+      // An explicit Stop also resets the per-keyword photo windows: a later Start is
+      // a fresh hunt, not a continuation of a clock from an earlier session.
+      await setLocal({ runState: RUN_STATE_STOPPED, sheetsAutomation: false, [GRACE_STORAGE_KEY]: {} });
       const running = (await recordedScanJobs()).filter((job) => job?.status === "running");
       let last = null;
       for (const entry of running) {
@@ -651,6 +712,10 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         const progressing = exhausted || Number(job.reviewsSaved || 0) > 0 || /^(?:Target reached|Complete)/i.test(job.stage || "");
         const deadPage = !blocked && (Boolean(job.error) || DEAD_PAGE_STRIKE.test(job.stage || ""));
         await recordScanStrike(job.searchKey, deadPage && !progressing).catch(() => {});
+        // A run that filled something — or finished the city — gives the next round
+        // a fresh five-minute photo window. A failed or interrupted run keeps the
+        // clock, so repeated restarts cannot postpone the grace forever.
+        if (job.auto && (exhausted || Number(job.reviewsSaved || 0) > 0)) await clearKeywordGrace(job.searchKey).catch(() => {});
         if (await isRunning() && !blocked) setTimeout(() => runSheetsAutomation({ force: true }).catch(() => {}), JOB_GAP_MS);
         if (job.tabId) setTimeout(() => chrome.tabs.remove(job.tabId).catch(() => {}), 300);
       }
@@ -742,7 +807,8 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   // disagree with the button. Both map onto the one switch.
   if (message?.type === "SET_SHEETS_AUTOMATION") {
     const enabled = Boolean(message.enabled);
-    setLocal({ runState: enabled ? RUN_STATE_RUNNING : RUN_STATE_STOPPED, sheetsAutomation: enabled }).then(() => {
+    setLocal({ runState: enabled ? RUN_STATE_RUNNING : RUN_STATE_STOPPED, sheetsAutomation: enabled,
+      ...(enabled ? {} : { [GRACE_STORAGE_KEY]: {} }) }).then(() => {
       sendResponse({ ok: true, enabled });
       if (enabled) runSheetsAutomation({ force: true }).catch(() => {});
     }).catch((error) => sendResponse({ ok: false, error: error.message }));

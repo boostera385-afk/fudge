@@ -655,6 +655,13 @@ async function testDriveUploadKeepsPhotoPositions() {
   assert.equal(store.data.reviews[0].drivePhotos.length, 2, "Drive slots must stay aligned with original photos");
   assert.equal(store.data.reviews[0].drivePhotos[0], null, "a failed first photo must keep an empty first slot");
   assert.equal(store.data.reviews[0].drivePhotos[1].id, "drive-second", "the second Drive file must remain attached to photo two");
+  // The connector writes its links position by position too, so a partly uploaded
+  // review must report no links at all rather than shift picture two into slot one.
+  const connector = fs.readFileSync(path.join(root, "apps-script.gs"), "utf8");
+  const copyStart = connector.indexOf("const copyToDrive =");
+  const copyBody = connector.slice(copyStart, connector.indexOf("const ensureDriveLinks", copyStart));
+  assert.match(copyBody, /result\.files\.length !== batch\.length\) return \[\]/,
+    "a partial Drive upload must never produce positionally wrong links");
 }
 
 async function testDriveUploadKeepsReviewsCollectedMeanwhile() {
@@ -1294,6 +1301,16 @@ async function testACheckpointNeverMovesBackwards() {
   assert.equal(row[4], 4);
   assert.equal(row[5], 9, "the newer position is kept");
   assert.deepEqual(row[7].split("|").sort(), ["place-a", "place-b", "place-c"], "and visited businesses are only ever added to");
+
+  // "No more results" describes the whole keyword/city, not the page the record
+  // came from. Refusing this stale write left every Structure row waiting forever,
+  // because later runs resumed from the newer checkpoint and never reached the end.
+  await service.recordProgress({ searchKey: key, serviceKeyword: "flooring installation", city: "Dallas, TX", currentPage: 2, businessIndex: 1, visitedPlaceIds: [] }, true);
+  assert.equal(written.length, 2, "exhaustion must be recorded even from a position behind the checkpoint");
+  const exhaustedRow = written[1].values[0];
+  assert.equal(exhaustedRow[4], 4, "the newer page stays");
+  assert.equal(exhaustedRow[5], 7, "the newer business stays");
+  assert.equal(exhaustedRow[6], "Yes", "and the keyword/city is marked exhausted");
 }
 
 // Cities take turns, and a city picked up again resumes exactly where it stopped.
@@ -2360,11 +2377,11 @@ function testLiveGoogleRegressions() {
   assert.match(background, /end of results\|page limit reached/i, "the page cap must complete the city instead of reopening page five");
   assert.match(background, /const onLivePlacesTab = async \(job\) => \{[\s\S]*chrome\.tabs\.get\(job\.tabId\)/, "a stale running job must be checked before blocking resume");
   assert.match(background, /if \(!leaseExpired\(job\) && await onLivePlacesTab\(job\)\) \{ live\.push\(job\); continue; \}/, "a live runner is left alone");
-  assert.match(background, /await updateScanJob\(\{ id: job\.id, tabId: job\.tabId, status: "interrupted"/, "only the dead runner is interrupted, never a sibling still scanning");
-  assert.match(background, /await SheetsService\.recordProgress\(job, false\)[\s\S]{0,160}status: "interrupted"/, "save a dead runner's checkpoint before releasing it");
+  assert.match(background, /await updateScanJob\(\{ id: (?:job|record)\.id, tabId: (?:job|record)\.tabId, status: "interrupted"/, "only the dead runner is interrupted, never a sibling still scanning");
+  assert.match(background, /await SheetsService\.recordProgress\(job, false\)[\s\S]{0,1200}status: "interrupted"/, "save a dead runner's checkpoint before releasing it");
   // Stop is unconditional now. Making it depend on the mirrored job left automation
   // switched on, and the alarm reopened tabs a minute after the user stopped.
-  assert.match(background, /if \(message\?\.type === "STOP_SCAN_JOB"\)[\s\S]*?await setLocal\(\{ runState: RUN_STATE_STOPPED, sheetsAutomation: false \}\);/, "Stop must switch collecting off whatever state the jobs are in");
+  assert.match(background, /if \(message\?\.type === "STOP_SCAN_JOB"\)[\s\S]*?await setLocal\(\{ runState: RUN_STATE_STOPPED, sheetsAutomation: false[^\n]*\}\);/, "Stop must switch collecting off whatever state the jobs are in");
   assert.match(background, /if \(await isRunning\(\) && !blocked\) setTimeout/, "completion must honor the one run switch and never restart while blocked");
   assert.match(background, /chrome\.tabs\.onRemoved\.addListener/, "closing a runner tab must release its scanning slot");
   assert.match(background, /const done = entry\.status !== "running" \|\| leaseExpired\(entry\)/, "a running record with a lapsed lease must not survive forever");
@@ -3449,11 +3466,13 @@ async function testOrphanRunnerTabsAreClosed() {
 // Stop has to mean stopped. Tying it to the mirrored job left automation switched
 // on, and the one-minute alarm reopened tabs a minute later.
 async function testStopIsUnconditional() {
-  const store = storage({ runState: "running", scanJob: { id: "manual", status: "complete", auto: false } });
+  const store = storage({ runState: "running", scanJob: { id: "manual", status: "complete", auto: false },
+    keywordGraceStartedAt: { "roof|leeds|photo": new Date(Date.now() - 60_000).toISOString() } });
   const context = backgroundContext(store, { tabs: [] });
   const result = await askBackground(context, { type: "STOP_SCAN_JOB" });
   assert.equal(result.ok, true);
   assert.equal((await store.local.get({ runState: "" })).runState, "stopped", "Stop must switch collecting off even with nothing running");
+  assert.deepEqual(store.data.keywordGraceStartedAt, {}, "Stop also starts a fresh photo window for a later Start");
   // And a later alarm must not undo that.
   let synced = 0;
   const quiet = backgroundContext(store, { sync: async () => { synced += 1; return { ok: true, nextJobs: [] }; } });
@@ -4232,6 +4251,152 @@ function testTransientRephraseFailureIsRetriedLater() {
   assert.ok(row[12], "the row keeps readable text rather than being left blank");
 }
 
+// The five-minute fallback to photo-less reviews belongs to the keyword, not to a
+// runner tab. Every new job used to restart the clock, so a keyword whose five-star
+// reviews had no photos never accepted one and its row said "Waiting for reviews"
+// forever while the scanner went round again.
+async function testPhotoGraceFollowsTheKeywordNotTheTab() {
+  const key = "roof repair|leeds|photo";
+  const spec = { auto: true, searchKey: key, serviceKeyword: "Roof Repair", city: "Leeds", query: "roof repair Leeds", reviewMode: "photo", currentPage: 1, businessIndex: 0, visitedPlaceIds: [] };
+  const store = storage({ runState: "running" });
+  const tabs = [];
+  const starts = [];
+  const context = backgroundContext(store, {
+    tabs,
+    onSendMessage: async (_tabId, message) => {
+      if (message.type === "FUDGE_START_SCAN") starts.push(message.options.keywordStartedAt);
+    }
+  });
+
+  const first = await context.startAutomaticJob(spec);
+  assert.ok(first, "the first runner starts");
+  assert.ok(Number.isFinite(Date.parse(starts[0])), "every job carries a photo-grace start time");
+  assert.equal(store.data.keywordGraceStartedAt[key], starts[0], "the clock is saved with the keyword, so a worker restart finds it");
+
+  await context.updateScanJob({ id: first.id, tabId: first.tabId, status: "interrupted" });
+  tabs.length = 0;
+  const second = await context.startAutomaticJob(spec);
+  assert.ok(second, "the restarted runner starts");
+  assert.equal(starts[1], starts[0], "a restarted job continues the same five minutes instead of starting them again");
+
+  // A run that fills rows is progress, so the next requirement gets a fresh window.
+  const oldGrace = new Date(Date.now() - 10 * 60 * 1000).toISOString();
+  await store.local.set({ keywordGraceStartedAt: { [key]: oldGrace } });
+  await askBackground(context, { type: "SCAN_JOB_COMPLETE", patch: { id: second.id, stage: "Target reached 2 reviews", reviewsSaved: 2, currentPage: 1, businessIndex: 1, visitedPlaceIds: [] } });
+  await new Promise((resolve) => setTimeout(resolve, 10));
+  assert.equal(store.data.keywordGraceStartedAt?.[key], undefined, "a productive run clears the keyword's photo window");
+  tabs.length = 0;
+  const third = await context.startAutomaticJob(spec);
+  assert.ok(third, "the next requirement still starts");
+  assert.ok(Date.parse(starts[2]) > Date.parse(oldGrace), "and it gets a new window");
+
+  await askBackground(context, { type: "STOP_SCAN_JOB" });
+  assert.deepEqual(store.data.keywordGraceStartedAt, {}, "Stop means a later Start is a fresh hunt, not an old clock");
+}
+
+// Two quick Start presses, or a Start racing the alarm, used to open two tabs for
+// one keyword because both checked for a live runner before either job existed.
+async function testTwoStartsNeverOpenTwoTabs() {
+  const spec = { auto: true, searchKey: "roof repair|leeds|photo", serviceKeyword: "Roof Repair", city: "Leeds", query: "roof repair Leeds", reviewMode: "photo", currentPage: 1, businessIndex: 0, visitedPlaceIds: [] };
+  const store = storage({ runState: "running" });
+  const tabs = [];
+  const context = backgroundContext(store, { tabs });
+  const [first, second] = await Promise.all([context.startAutomaticJob(spec), context.startAutomaticJob(spec)]);
+  assert.equal(tabs.length, 1, "one keyword must never get two runners");
+  assert.ok(first && second);
+  assert.equal(second.id, first.id, "the second call must report the job already running");
+}
+
+// A live runner must not be declared dead by a checkout that overlapped a
+// heartbeat, or by one missed tab lookup. Both used to mark the job interrupted
+// and hand its slot away while the tab was still reading Google.
+async function testTabMissAndLateHeartbeatDoNotEndALiveJob() {
+  const old = new Date(Date.now() - 60 * 60 * 1000).toISOString();
+  const page = { id: 42, url: "https://www.google.com/search?q=roof&udm=local", status: "complete" };
+  const store = storage({ runState: "running", scanJobs: { live: { id: "live", status: "running", auto: true, tabId: 42, searchKey: "roof|leeds|photo", updatedAt: old, leaseUntil: old } } });
+  const context = backgroundContext(store, { tabs: [page] });
+  let checkpointStarted;
+  const entered = new Promise((resolve) => { checkpointStarted = resolve; });
+  let release;
+  const blocked = new Promise((resolve) => { release = resolve; });
+  context.SheetsService.recordProgress = async () => { checkpointStarted(); await blocked; };
+  const statePromise = askBackground(context, { type: "GET_RUN_STATE" });
+  await entered;
+  await context.updateScanJob({ id: "live", stage: "Reading reviews" });
+  release();
+  const state = await statePromise;
+  assert.equal(state.jobs.length, 1, "a runner that heartbeats during a checkpoint is still running");
+  assert.equal(state.jobs[0].id, "live");
+  assert.equal(store.data.scanJobs.live.status, "running", "a live job must not be reported as interrupted");
+
+  const fresh = new Date(Date.now() + 60 * 1000).toISOString();
+  const flakyStore = storage({ runState: "running", scanJobs: { flaky: { id: "flaky", status: "running", auto: true, tabId: 43, searchKey: "roof|leeds|photo", updatedAt: new Date().toISOString(), leaseUntil: fresh } } });
+  const flaky = backgroundContext(flakyStore, { tabs: [{ ...page, id: 43 }] });
+  let lookups = 0;
+  flaky.chrome.tabs.get = async (tabId) => (++lookups === 1 ? null : { id: tabId, url: page.url, status: "complete" });
+  const flakyState = await askBackground(flaky, { type: "GET_RUN_STATE" });
+  assert.equal(flakyState.jobs.length, 1, "a single missed tab lookup is not proof the tab is gone");
+  assert.equal(flakyStore.data.scanJobs.flaky.status, "running");
+}
+
+// A review's shape is its own. Text-only reviews are kept when they say so, and a
+// missing photo no longer deletes the review the scan just accepted.
+async function testTextOnlyReviewSurvivesTheLibrary() {
+  const textOnly = (reviewMode) => storage({ reviews: [{
+    id: "google:text-only", googleReviewId: "text-only", rating: 5, reviewMode,
+    text: "They repaired our roof after the storm.", placeName: "Roof Co", placeId: "roof-place", photos: []
+  }] });
+  const withoutPicture = sheetsContext(textOnly("without-picture"), async () => { throw new Error("No network expected"); });
+  const kept = await withoutPicture.__Fudge.getReviews();
+  assert.equal(kept.length, 1, "a text-only review must stay in the library");
+  const mislabelled = sheetsContext(textOnly("photo"), async () => { throw new Error("No network expected"); });
+  assert.equal((await mislabelled.__Fudge.getReviews()).length, 0, "an empty photo review is the stale shape that got recollected");
+
+  const content = fs.readFileSync(path.join(root, "content.js"), "utf8");
+  const saveStart = content.indexOf("const saveBatch =");
+  const saveBody = content.slice(saveStart, content.indexOf("const runJob =", saveStart));
+  assert.ok(saveStart > 0);
+  assert.match(saveBody, /reviewMode:\s*\(review\.photos \|\| \[\]\)\.length \? "photo" : "without-picture"/,
+    "a saved review is classified by its own pictures");
+  assert.doesNotMatch(saveBody, /reviewMode:\s*job\.reviewMode/,
+    "the job's requirement must never be stamped onto a text-only review");
+}
+
+// Connecting a different Sheet must not carry the old Sheet's view of the world:
+// known reviews suppress new rows, and saved work could start the old keyword.
+async function testDifferentSheetDropsPreviousCaches() {
+  const caches = {
+    sheetsStatus: { ok: true, stage: "Old sheet" },
+    sheetKnownReviewIds: ["old-id"],
+    sheetKnownReviewFingerprints: ["old-fingerprint"],
+    sheetKnownReviewContentKeys: ["old-content"],
+    recordedBusinessKeys: ["place|roof repair|leeds"],
+    sheetHeaderCheck: { version: 1 },
+    keywordGraceStartedAt: { "roof|leeds|photo": "2026-01-01T00:00:00.000Z" }
+  };
+  const store = storage({ appsScriptUrl: EXEC_URL, appsScriptSecret: SECRET, appsScriptSecretBackup: SECRET,
+    sheetsDatabase: { connector: "apps-script", spreadsheetId: "sheet-1" }, runState: "running", sheetsAutomation: true, ...caches });
+  const fetchImpl = async (_url, options) => {
+    const request = JSON.parse(options.body);
+    const reply = (value) => ({ ok: true, status: 200, text: async () => JSON.stringify(value) });
+    if (request.action === "setup") return reply({ ok: true, spreadsheetId: "sheet-2", spreadsheetUrl: "https://docs.google.com/spreadsheets/d/sheet-2" });
+    return reply({ ok: true });
+  };
+  const service = sheetsContext(store, fetchImpl).__SheetsService;
+  const database = await service.configure(EXEC_URL, SECRET);
+  assert.equal(database.spreadsheetId, "sheet-2");
+  Object.keys(caches).forEach((key) => assert.equal(store.data[key], undefined, `${key} must not follow a different Sheet`));
+  assert.equal(store.data.runState, "stopped", "a new Sheet waits for Start");
+
+  // Retesting the same Sheet keeps its caches and its collection state.
+  const other = storage({ appsScriptUrl: EXEC_URL, appsScriptSecret: SECRET, appsScriptSecretBackup: SECRET,
+    sheetsDatabase: { connector: "apps-script", spreadsheetId: "sheet-1" }, runState: "running", sheetsAutomation: true, ...caches });
+  const same = sheetsContext(other, connectorStub({ calls: [] })).__SheetsService;
+  await same.configure(EXEC_URL, SECRET);
+  Object.keys(caches).forEach((key) => assert.deepEqual(other.data[key], caches[key], `${key} belongs to this Sheet and must survive a retest`));
+  assert.equal(other.data.runState, "running");
+}
+
 (async () => {
   const tests = [
     ["used data isolation", testUsedDataIsolation],
@@ -4266,6 +4431,11 @@ function testTransientRephraseFailureIsRetriedLater() {
     ["written rows are rephrased in the same request", testWrittenRowsAreRephrasedInTheSameRequest],
     ["scattered rows are read in groups", testScatteredRowsAreReadInGroups],
     ["transient rephrase failure is retried later", testTransientRephraseFailureIsRetriedLater],
+    ["photo grace follows the keyword, not the tab", testPhotoGraceFollowsTheKeywordNotTheTab],
+    ["two starts never open two tabs", testTwoStartsNeverOpenTwoTabs],
+    ["a tab miss or late heartbeat does not end a live job", testTabMissAndLateHeartbeatDoNotEndALiveJob],
+    ["text-only reviews survive the library", testTextOnlyReviewSurvivesTheLibrary],
+    ["a different Sheet drops the previous caches", testDifferentSheetDropsPreviousCaches],
     ["unused data isolation", testUnusedDataIsolation],
     ["content duplicate identity", testContentDuplicateIdentity],
     ["duplicate merge keeps Drive alignment", testDuplicateMergeKeepsDrivePhotoAlignment],

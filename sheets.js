@@ -205,8 +205,14 @@ const SheetsService = (() => {
       const sameSheet = previous.sheetsDatabase?.connector === "apps-script" && previous.sheetsDatabase.spreadsheetId === database.spreadsheetId;
       // Retesting an existing Sheet must not act like Stop (or overwrite a Stop
       // pressed during setup). First connections / different Sheets stay paused.
-      await chrome.storage.local.set(sameSheet ? { sheetsDatabase: database }
-        : { sheetsDatabase: database, runState: "stopped", sheetsAutomation: false, saveToDrive: true });
+      if (sameSheet) await chrome.storage.local.set({ sheetsDatabase: database });
+      else {
+        // A different Sheet must not inherit the previous one's caches. A stale
+        // known-review set suppresses new rows, and a stale nextJobs list could
+        // start scanning the old Sheet's keyword after Start.
+        await chrome.storage.local.remove(["sheetsStatus", "sheetKnownReviewIds", "sheetKnownReviewFingerprints", "sheetKnownReviewContentKeys", "recordedBusinessKeys", "sheetHeaderCheck", "keywordGraceStartedAt"]);
+        await chrome.storage.local.set({ sheetsDatabase: database, runState: "stopped", sheetsAutomation: false, saveToDrive: true });
+      }
       await chrome.storage.local.remove(["driveClientId", "driveOAuth", "driveProfile", "driveFolderId"]);
       return database;
     } catch (error) {
@@ -251,7 +257,7 @@ const SheetsService = (() => {
     // this one's "already known" sets and silently refuses to record anything.
     // appsScriptSecretOwn deliberately survives: it is baked into connectors this
     // installation generated, so discarding it would strand its own deployments.
-    await chrome.storage.local.remove(["appsScriptUrl", "appsScriptSecret", "appsScriptSecretBackup", "sheetsDatabase", "sheetsStatus", "sheetsConnectorObservation", "sheetKnownReviewIds", "sheetKnownReviewFingerprints", "sheetKnownReviewContentKeys", "recordedBusinessKeys", "activeServiceKeywords", "serviceRules"]);
+    await chrome.storage.local.remove(["appsScriptUrl", "appsScriptSecret", "appsScriptSecretBackup", "sheetsDatabase", "sheetsStatus", "sheetsConnectorObservation", "sheetKnownReviewIds", "sheetKnownReviewFingerprints", "sheetKnownReviewContentKeys", "recordedBusinessKeys", "activeServiceKeywords", "serviceRules", "sheetHeaderCheck", "keywordGraceStartedAt"]);
     connectorVersion = 0;
     connectorObservation = null;
     connectorAutomation = null;
@@ -653,7 +659,9 @@ const SheetsService = (() => {
         if (entry.row[2] !== serviceLabel || entry.row[3] !== subcategoryLabel) {
           entry.row[2] = serviceLabel;
           entry.row[3] = subcategoryLabel;
-          updates.push({ range: `Reviews!C${entry.rowNumber}:D${entry.rowNumber}`, values: [[serviceLabel, subcategoryLabel]] });
+          // A row appended in this same sync may have no known position yet; a
+          // write to row 0 would make the connector reject the whole batch.
+          if (entry.rowNumber) updates.push({ range: `Reviews!C${entry.rowNumber}:D${entry.rowNumber}`, values: [[serviceLabel, subcategoryLabel]] });
         }
         const desired = local.rejectedAt ? "Rejected" : local.usedAt ? "Used" : "Unused";
         const sheetStatus = entry.row[11];
@@ -726,7 +734,7 @@ const SheetsService = (() => {
           const old = inventory.find((item) => item.id === oldId);
           if (old) {
             old.status = "rejected"; old.row[11] = "Rejected"; old.row[12] = ""; old.row[13] = row[0]; old.row[16] = "Rejected during quality checking";
-            updates.push({ range: `Reviews!L${old.rowNumber}:Q${old.rowNumber}`, values: [[old.row[11], old.row[12], old.row[13], old.row[14], old.row[15], old.row[16]]] });
+            if (old.rowNumber > 1) updates.push({ range: `Reviews!L${old.rowNumber}:Q${old.rowNumber}`, values: [[old.row[11], old.row[12], old.row[13], old.row[14], old.row[15], old.row[16]]] });
             const local = localById.get(oldId);
             if (local) { local.rejectedAt = now(); local.usedAt = null; local.releasedAt = null; }
           }
@@ -757,7 +765,7 @@ const SheetsService = (() => {
           item.row[12] = "";
           item.row[13] = "";
           item.row[16] = "Duplicate review blocked automatically";
-          updates.push({ range: `Reviews!L${item.rowNumber}:Q${item.rowNumber}`, values: [[item.row[11], item.row[12], item.row[13], item.row[14], item.row[15], item.row[16]]] });
+          if (item.rowNumber > 1) updates.push({ range: `Reviews!L${item.rowNumber}:Q${item.rowNumber}`, values: [[item.row[11], item.row[12], item.row[13], item.row[14], item.row[15], item.row[16]]] });
           const local = localById.get(item.id);
           if (local) { local.rejectedAt = now(); local.usedAt = null; local.releasedAt = null; local.requestId = ""; }
         }
@@ -1090,7 +1098,12 @@ const SheetsService = (() => {
     const page = Math.max(1, Number(job.currentPage) || 1);
     const businessIndex = Math.max(0, Number(job.businessIndex) || 0);
     const behind = stored && (page < storedPage || (page === storedPage && businessIndex < storedIndex));
-    if (behind) return;
+    // A stale position must not drag the checkpoint back. Exhaustion is different:
+    // it describes the whole keyword/city, not the page the record came from.
+    // Dropping it here left every row waiting forever, because later runs resumed
+    // from the newer checkpoint and never reached the end again. Keep the newer
+    // position and still record "no more results".
+    if (behind && (!exhausted || Fudge.normalize(stored?.[6]) === "yes")) return;
     // Visited businesses are only ever added to, never dropped, so a run that ends
     // early cannot make Fudge forget where it has already been.
     const visited = [...new Set([...clean(stored ? stored[7] : "").split("|").filter(Boolean), ...(job.visitedPlaceIds || [])])];

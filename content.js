@@ -762,7 +762,12 @@
         matchedKeyword: belongsToTargetFamily ? (job.serviceKeyword || "") : (review.matchedKeyword || ""),
         searchCity: job.city || review.searchCity || "",
         searchKeyword: job.serviceKeyword || review.searchKeyword || "",
-        reviewMode: job.reviewMode || review.reviewMode
+        // Keep the review's real shape, never the job's requirement. A text-only
+        // review accepted after the photo grace used to be stamped "photo"; the
+        // library then discarded it (no photos) and the same review was collected
+        // again on every restart, leaving the row waiting forever. Without Picture
+        // is also what lets the Sheet use it for a "Self Write" requirement.
+        reviewMode: (review.photos || []).length ? "photo" : "without-picture"
       };
     });
     const saved = await Fudge.addReviews(eligible);
