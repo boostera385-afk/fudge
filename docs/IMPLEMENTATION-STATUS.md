@@ -1,5 +1,30 @@
 # Fudge backend implementation status
 
+## Live database acceptance of the intake contract - 2026-11-04
+
+Read-only inspection plus 41 checks in rolled-back transactions against the
+hosted shared project confirmed the deployed `fudge_ingestion_v1` contract
+(hosted `20261028203642`, 34 migrations at run time): authenticated-only
+SECURITY INVOKER wrapper with empty `search_path`, private SECURITY DEFINER
+implementation, RLS with staff-read policies only and no direct client write
+path, and `anon` denied on both the RPC and the tables.
+
+Valid intake, idempotent replay, revision numbering and first-payload
+immutability, workspace isolation, rating `5`/`5.0` normalisation, every
+documented validation rejection and the 1/100/101 batch boundaries behaved as
+designed. The existing ND Test operator account passed the live staff gate and
+read back only its own rows; that check asserted identity as JWT claims inside an
+aborted transaction, so no password or session was used. No rows persisted
+(records/revisions 0/0 after all runs, no fixture organizations or auth users
+left).
+
+Local suites re-run the same day: 67 backend, 19 setup/version and 138 smoke
+assertions PASS. The installed extension UI, Auth sign-in, Sheet/Drive connector
+and backend upload remain unproven; `UPLOAD_RELEASED` and
+`CATALOG_DOWNLOAD_RELEASED` are still false. A development Sheet and a
+signed-in browser session are still required for live acceptance. Evidence:
+[`DB-ACCEPTANCE-20261104.md`](DB-ACCEPTANCE-20261104.md). This record was committed on the owner's request.
+
 ## Owner-reported scraping fixes — 2026-10-30
 
 The owner reported four issues dated 27/OCT/2026: the Sheet's "Waiting for
