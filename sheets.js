@@ -188,6 +188,8 @@ const SheetsService = (() => {
     const appsScriptSecret = clean(parsed.secret);
     if (!validUrl(appsScriptUrl)) throw new Error("Paste the deployed Apps Script URL ending in /exec.");
     if (appsScriptSecret.length < 24) throw new Error("The Fudge connector secret is missing.");
+    const previous = await chrome.storage.local.get({ appsScriptUrl: "", appsScriptSecret: "", appsScriptSecretBackup: "", sheetsDatabase: null, sheetsConnectorObservation: null });
+    const previousConnector = { version: connectorVersion, observation: connectorObservation, automation: connectorAutomation };
     connectorVersion = 0;
     await chrome.storage.local.set({ appsScriptUrl, appsScriptSecret, appsScriptSecretBackup: appsScriptSecret });
     try {
@@ -198,13 +200,27 @@ const SheetsService = (() => {
       const result = await connectWithKnownSecret(appsScriptSecret);
       await ensureAutomation();
       const database = { spreadsheetId: result.spreadsheetId, spreadsheetUrl: result.spreadsheetUrl, connectedAt: now(), connector: "apps-script" };
-      // Connecting a sheet prepares everything and collects nothing. Fudge waits
-      // for Start, so linking a sheet can never surprise someone with open tabs.
-      await chrome.storage.local.set({ sheetsDatabase: database, runState: "stopped", sheetsAutomation: false, saveToDrive: true });
+      const current = await chrome.storage.local.get({ appsScriptUrl: "" });
+      if (current.appsScriptUrl !== appsScriptUrl) throw new Error("The connection changed during setup. Try again.");
+      const sameSheet = previous.sheetsDatabase?.connector === "apps-script" && previous.sheetsDatabase.spreadsheetId === database.spreadsheetId;
+      // Retesting an existing Sheet must not act like Stop (or overwrite a Stop
+      // pressed during setup). First connections / different Sheets stay paused.
+      await chrome.storage.local.set(sameSheet ? { sheetsDatabase: database }
+        : { sheetsDatabase: database, runState: "stopped", sheetsAutomation: false, saveToDrive: true });
       await chrome.storage.local.remove(["driveClientId", "driveOAuth", "driveProfile", "driveFolderId"]);
       return database;
     } catch (error) {
-      await chrome.storage.local.remove(["appsScriptUrl", "sheetsDatabase"]);
+      const current = await chrome.storage.local.get({ appsScriptUrl: "" });
+      // Network/permission failures are not Disconnect. Keep the last saved
+      // connection for automatic retries, unless the user disconnected meanwhile.
+      if (current.appsScriptUrl === appsScriptUrl) {
+        if (previous.appsScriptUrl && previous.sheetsDatabase) {
+          await chrome.storage.local.set(previous);
+          connectorVersion = previousConnector.version;
+          connectorObservation = previousConnector.observation;
+          connectorAutomation = previousConnector.automation;
+        } else await chrome.storage.local.remove(["appsScriptUrl", "sheetsDatabase"]);
+      }
       throw error;
     }
   }

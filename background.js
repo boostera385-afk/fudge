@@ -79,22 +79,36 @@ const configuredParallelTabs = async () => safeParallelTabs((await getLocal({ pa
 // A scan that dies on the same page error keeps its Sheet checkpoint, so every
 // unattended retry walks back into the same broken page — the exact "stops
 // during scraping and never progresses" loop. After this many fruitless rounds
-// the keyword/city stands down; a human Start or Sync now always gets one fresh
-// attempt, and any run that ends normally or saves reviews clears the count.
+// the keyword/city backs off before retrying automatically; a human Start or Sync
+// now can retry sooner. A successful run clears the count.
 const SCAN_ERROR_STRIKE_LIMIT = 3;
+const SCAN_ERROR_RETRY_MS = 5 * 60 * 1000;
 const DEAD_PAGE_STRIKE = /results did not load|could not load|stopped with an error|reviews unavailable/i;
 async function recordScanStrike(searchKey, hit) {
   if (!searchKey) return;
-  const { scanErrorStrikes = {} } = await getLocal({ scanErrorStrikes: {} });
+  const { scanErrorStrikes = {}, scanRetryAfter = {} } = await getLocal({ scanErrorStrikes: {}, scanRetryAfter: {} });
   const next = { ...scanErrorStrikes };
-  if (!hit) delete next[searchKey];
-  else next[searchKey] = Math.min((next[searchKey] || 0) + 1, SCAN_ERROR_STRIKE_LIMIT);
-  await setLocal({ scanErrorStrikes: next });
+  const retries = { ...scanRetryAfter };
+  if (!hit) { delete next[searchKey]; delete retries[searchKey]; }
+  else {
+    next[searchKey] = Math.min((next[searchKey] || 0) + 1, SCAN_ERROR_STRIKE_LIMIT);
+    if (next[searchKey] >= SCAN_ERROR_STRIKE_LIMIT) retries[searchKey] = new Date(Date.now() + SCAN_ERROR_RETRY_MS).toISOString();
+  }
+  await setLocal({ scanErrorStrikes: next, scanRetryAfter: retries });
 }
 async function scanStrikeHeld(searchKey) {
   if (!searchKey) return false;
-  const { scanErrorStrikes = {} } = await getLocal({ scanErrorStrikes: {} });
-  return (scanErrorStrikes[searchKey] || 0) >= SCAN_ERROR_STRIKE_LIMIT;
+  const { scanErrorStrikes = {}, scanRetryAfter = {} } = await getLocal({ scanErrorStrikes: {}, scanRetryAfter: {} });
+  if ((scanErrorStrikes[searchKey] || 0) < SCAN_ERROR_STRIKE_LIMIT) return false;
+  const retryAt = Date.parse(scanRetryAfter[searchKey] || "");
+  if (!Number.isFinite(retryAt)) {
+    // Older installations had a permanent hold with no retry deadline.
+    await setLocal({ scanRetryAfter: { ...scanRetryAfter, [searchKey]: new Date(Date.now() + SCAN_ERROR_RETRY_MS).toISOString() } });
+    return true;
+  }
+  if (retryAt > Date.now()) return true;
+  await recordScanStrike(searchKey, false);
+  return false;
 }
 
 async function ensureSheetsAlarm() {
@@ -456,11 +470,10 @@ async function automationPass({ force = false, interactive = false, activate = f
       const { sheetsStatus = null } = await getLocal({ sheetsStatus: null });
       await setLocal({ sheetsStatus: { ...(sheetsStatus || {}), ok: true, retrying: true, notice: startErrors[0], noticeAt: new Date().toISOString() } });
     }
-    // Standing a struck-out page down is reported the same way, never silent: the
-    // row is still waiting and only the operator can fix the page or press Start.
+    // A held page is still queued: explain the backoff, not a permanent stop.
     if (!started.length && !startErrors.length && strikeHeld.length) {
       const { sheetsStatus = null } = await getLocal({ sheetsStatus: null });
-      await setLocal({ sheetsStatus: { ...(sheetsStatus || {}), ok: true, retrying: true, notice: `Held back: ${strikeHeld[0]} kept failing on the same Google page. Press Start to try it again, or Sync now after checking it.`, noticeAt: new Date().toISOString() } });
+      await setLocal({ sheetsStatus: { ...(sheetsStatus || {}), ok: true, retrying: true, notice: `Held back: ${strikeHeld[0]} kept failing on the same Google page. Retrying automatically after a 5-minute pause; Sync now can retry sooner.`, noticeAt: new Date().toISOString() } });
     }
     return { ...result, startedJob: started.length > 0, job: started[0] || null, startedJobs: started, startErrors, strikeHeld, runnersBusy: running.length };
   } catch (error) {
@@ -686,7 +699,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     SheetsService.configure(message.url, message.secret).then(async (database) => {
       const sync = await runSheetsAutomation({ force: true, startJobs: false });
       sendResponse(sync.ok
-        ? { ok: true, database, sync, retrying: Boolean(sync.retrying), notice: sync.notice || "" }
+        ? { ok: true, database, sync, runState: await isRunning() ? RUN_STATE_RUNNING : RUN_STATE_STOPPED, retrying: Boolean(sync.retrying), notice: sync.notice || "" }
         : { ok: false, database, error: sync.error });
     }).catch((error) => sendResponse({ ok: false, error: error.message }));
     return true;

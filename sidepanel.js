@@ -73,7 +73,7 @@ function setState(state, { label, source } = {}) {
   elements.stop.hidden = !stoppable;
   elements.progress.hidden = !running;
   setLabel(elements.collect, "Start collecting");
-  setLabel(elements.stop, running ? "Stop scan" : "Stop collecting");
+  setLabel(elements.stop, "Stop collecting");
 }
 
 function renderJob(job) {

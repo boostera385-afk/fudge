@@ -44,6 +44,22 @@ fixtures. No live customer Sheet, installed extension or Drive was accessed for
 this repair. Missing source photos must be collected again; an empty picture
 cell cannot be reconstructed from text alone.
 
+## Background collection lifetime
+
+- Closing the sidebar is display-only. The saved Start/Stop intent and Chrome
+  alarm continue without a sidebar connection, including service-worker restart.
+- Reconnecting the same Sheet preserves that intent. A failed reconnect retains
+  the last saved connection; finishing setup cannot undo a concurrent Stop or
+  Disconnect. New/different Sheets still connect paused.
+- Three fruitless page errors now schedule a durable five-minute retry instead
+  of an indefinite hold. Google block cooldowns and explicit Stop still win.
+- Sidebar/setup wording distinguishes closing the panel from stopping collection.
+  No always-on remote scraper was added: Chrome must remain running and awake.
+
+Lifetime validation: **138 smoke + 86 backend/setup/version tests PASS** with local
+fixtures; installed-browser close/reopen and real network recovery still need a
+live pilot. This follow-up changes only extension code, not the connector template.
+
 Earlier release validation: **132 smoke, 67 backend and 18 setup/version tests PASS**, all root
 JS/Apps Script syntax checks PASS; `git diff --check` PASS (line-ending notices
 only). Real installed Chrome, fresh isolated context and intercepted local files:

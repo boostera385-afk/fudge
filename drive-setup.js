@@ -15,11 +15,11 @@ function showToast(message, variant = "info") {
   toastTimer = setTimeout(() => toast.classList.remove("show"), 4800);
 }
 
-function renderConnection(database) {
+function renderConnection(database, running = false) {
   const card = $("#connectionCard");
   card.dataset.state = database ? "connected" : "idle";
   $("#connectionTitle").textContent = database ? "Fudge Sheet connection saved" : "Not connected";
-  $("#connectionDetail").textContent = database ? "Saved setup found. Use Sync now to check it. Collection stays stopped until Start collecting; Drive uploads can create public image links." : "The connector will create Fudge tabs and a Fudge Reviews folder in your Drive.";
+  $("#connectionDetail").textContent = database ? `Saved setup found. Use Sync now to check it. ${running ? "Collection is on and continues with the sidebar closed." : "Collection stays stopped until Start collecting."} Drive uploads can create public image links.` : "The connector will create Fudge tabs and a Fudge Reviews folder in your Drive.";
   $("#disconnectButton").hidden = !database;
   $("#copyConnectionButton").hidden = !database;
 }
@@ -47,7 +47,7 @@ async function loadSetup() {
   $("#connectButton").disabled = false;
   $("#webAppUrl").value = result.appsScriptUrl || "";
   const status = await chrome.runtime.sendMessage({ type: "GET_SHEETS_STATUS" }).catch(() => null);
-  if (generation === setupGeneration) renderConnection(status?.ok && status.connectionReady ? result.sheetsDatabase : null);
+  if (generation === setupGeneration) renderConnection(status?.ok && status.connectionReady ? result.sheetsDatabase : null, status?.runState === "running");
 }
 
 $("#copyScript").addEventListener("click", async () => {
@@ -69,15 +69,15 @@ $("#connectButton").addEventListener("click", async () => {
     if (!connectorCode) throw new Error("Protected connector is not ready. Reopen setup and try again.");
     const result = await chrome.runtime.sendMessage({ type: "SAVE_SCRIPT_SETUP", url, secret: connectorSecret });
     if (!result.ok) throw new Error(result.error);
-    renderConnection(result.database);
+    renderConnection(result.database, result.runState === "running");
     // Imported connection codes and recovery can select a different secret.
     // Refresh the generated copy so a later update preserves the live connection.
     try {
       await loadSetup();
-      showToast("Connected. Collection stays stopped until you press Start collecting.");
+      showToast(result.runState === "running" ? "Connected. Collection is still on and continues with the sidebar closed." : "Connected. Collection stays stopped until you press Start collecting.");
     } catch (_error) {
-      renderConnection(result.database);
-      showToast("Connection saved. Reopen setup before copying an updated connector; collection remains stopped.", "error");
+      renderConnection(result.database, result.runState === "running");
+      showToast("Connection saved. Reopen setup before copying an updated connector. Collection state was not changed by this display error.", "error");
     }
   } catch (error) {
     showToast(error.message, "error");

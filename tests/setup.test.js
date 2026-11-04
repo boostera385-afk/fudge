@@ -31,12 +31,12 @@ function harness(options = {}) {
       sendMessage: async (message) => {
         messages.push(message);
         if (message.type === "GET_SCRIPT_SETUP") return { ok: true, appsScriptSecret: options.secret ?? state.secret, appsScriptUrl: state.url, sheetsDatabase: state.database };
-        if (message.type === "GET_SHEETS_STATUS") return { ok: true, connectionReady: Boolean(state.database) };
+        if (message.type === "GET_SHEETS_STATUS") return { ok: true, connectionReady: Boolean(state.database), runState: options.runState || "stopped" };
         if (message.type === "SAVE_SCRIPT_SETUP") {
           state.secret = options.recoveredSecret || state.secret;
           state.url = "https://script.google.com/macros/s/fixture/exec";
           state.database = { spreadsheetId: "fixture-sheet" };
-          return { ok: true, database: state.database };
+          return { ok: true, database: state.database, runState: options.runState || "stopped" };
         }
         if (message.type === "DISCONNECT_SCRIPT") {
           if (options.disconnectFailure) throw new Error("Disconnected worker unavailable");
@@ -114,6 +114,13 @@ test("connect success does not claim collection started", async () => {
   const h = harness(); await h.ready; await h.click("#connectButton");
   assert.match(h.node("#toast").innerHTML, /Collection stays stopped/);
   assert.ok(!h.messages.some((message) => /START/.test(message.type)));
+});
+
+test("a running reconnect does not falsely say collection stopped", async () => {
+  const h = harness({ runState: "running" }); await h.ready; await h.click("#connectButton");
+  assert.match(h.node("#toast").innerHTML, /Collection is still on/);
+  assert.match(h.node("#connectionDetail").textContent, /continues with the sidebar closed/);
+  assert.ok(!h.messages.some((message) => /START|STOP/.test(message.type)));
 });
 
 test("disconnect failures are surfaced without an unhandled rejection", async () => {

@@ -365,6 +365,44 @@ async function testConnectorSetup() {
   assert.equal(store.data.runState, "stopped");
 }
 
+async function testReconnectPreservesCollectionAndConnection() {
+  for (const runState of ["running", "stopped"]) {
+    const store = storage({ appsScriptUrl: EXEC_URL, appsScriptSecret: SECRET, appsScriptSecretBackup: SECRET,
+      sheetsDatabase: { connector: "apps-script", spreadsheetId: "sheet-1" }, runState, sheetsAutomation: runState === "running" });
+    const service = sheetsContext(store, connectorStub({ calls: [] })).__SheetsService;
+    await service.configure(EXEC_URL, SECRET);
+    assert.equal(store.data.runState, runState, "retesting the same Sheet is not a Start or Stop command");
+    assert.equal(store.data.sheetsAutomation, runState === "running");
+  }
+  const database = { connector: "apps-script", spreadsheetId: "sheet-1" };
+  const store = storage({ appsScriptUrl: EXEC_URL, appsScriptSecret: SECRET, appsScriptSecretBackup: SECRET,
+    sheetsDatabase: database, runState: "running", sheetsAutomation: true });
+  const service = sheetsContext(store, async () => { throw new Error("Failed to fetch"); }).__SheetsService;
+  await assert.rejects(service.configure(EXEC_URL, "new-attempt-secret-0123456789abcdefghij"));
+  assert.equal(store.data.appsScriptUrl, EXEC_URL, "a failed reconnect must retain the last saved endpoint");
+  assert.equal(store.data.appsScriptSecret, SECRET, "a failed reconnect must not replace the working secret");
+  assert.deepEqual(store.data.sheetsDatabase, database);
+  assert.equal(store.data.runState, "running", "a temporary connection failure is not Stop");
+  const stopping = storage({ appsScriptUrl: EXEC_URL, appsScriptSecret: SECRET,
+    sheetsDatabase: database, runState: "running", sheetsAutomation: true });
+  const duringSetup = sheetsContext(stopping, connectorStub({ calls: [], onRequest: async (request) => {
+    if (request.action === "setup") await stopping.local.set({ runState: "stopped", sheetsAutomation: false });
+  } })).__SheetsService;
+  await duringSetup.configure(EXEC_URL, SECRET);
+  assert.equal(stopping.data.runState, "stopped", "Stop pressed during a reconnect must not be undone by its success");
+
+  const disconnecting = storage({ appsScriptUrl: EXEC_URL, appsScriptSecret: SECRET,
+    sheetsDatabase: database, runState: "running", sheetsAutomation: true });
+  const duringDisconnect = sheetsContext(disconnecting, connectorStub({ calls: [], onRequest: async (request) => {
+    if (request.action === "setup") {
+      await disconnecting.local.remove(["appsScriptUrl", "sheetsDatabase"]);
+      await disconnecting.local.set({ runState: "stopped", sheetsAutomation: false });
+    }
+  } })).__SheetsService;
+  await assert.rejects(duringDisconnect.configure(EXEC_URL, SECRET), /connection changed/i);
+  assert.equal(disconnecting.data.sheetsDatabase, undefined, "finishing setup must not undo an explicit Disconnect");
+}
+
 async function testConnectorVersionObservationSurvivesRestartWithoutCrossingSheets() {
   const store = storage();
   const service = sheetsContext(store, connectorStub({ calls: [], reportedVersion: CURRENT_CONNECTOR_VERSION })).__SheetsService;
@@ -3276,6 +3314,31 @@ async function testClosingTheRunnerTabEndsItsJob() {
   assert.equal(scanJobs.live.status, "interrupted", "a closed tab must end its job");
 }
 
+async function testCollectionSurvivesPanelCloseAndWorkerRestart() {
+  const spec = { auto: true, searchKey: "roof|leeds|photo", serviceKeyword: "Roof Repair", city: "Leeds", query: "roof repair Leeds", reviewMode: "photo" };
+  const store = storage({ runState: "running", sheetsAutomation: true });
+  const tabs = [];
+  // Neither a panel nor a persistent connection to it exists in this harness.
+  // Recreate the service worker and dispatch Chrome's durable alarm.
+  let worker = backgroundContext(store, { queued: [spec], tabs });
+  await worker.__alarm({ name: "fudge-sheets-sync" });
+  await new Promise((resolve) => setTimeout(resolve, 20));
+  assert.equal(tabs.length, 1, "collecting must open a runner with the sidebar closed");
+  worker = backgroundContext(store, { queued: [spec], tabs });
+  await worker.__alarm({ name: "fudge-sheets-sync" });
+  await new Promise((resolve) => setTimeout(resolve, 20));
+  assert.equal(tabs.length, 1, "worker restart must preserve the live runner, not duplicate it");
+  assert.equal((await askBackground(worker, { type: "GET_RUN_STATE" })).runState, "running");
+  await askBackground(worker, { type: "STOP_SCAN_JOB" });
+  worker = backgroundContext(store, { queued: [spec], tabs });
+  await worker.__alarm({ name: "fudge-sheets-sync" });
+  await new Promise((resolve) => setTimeout(resolve, 20));
+  assert.equal(tabs.length, 0, "an explicit Stop must survive sidebar close and worker restart");
+  assert.equal(store.data.runState, "stopped");
+  const panel = fs.readFileSync(path.join(root, "sidepanel.js"), "utf8");
+  assert.doesNotMatch(panel, /(?:beforeunload|pagehide|onDisconnect|onSuspend)/, "panel teardown must not own collection lifetime");
+}
+
 // A scan that dies on the same results page keeps its Sheet checkpoint, so the
 // unattended loop used to walk straight back into the same broken page every
 // pass — the exact "stops during scraping and never progresses" stall. After
@@ -3296,6 +3359,14 @@ async function testDeadPagesStandDownInsteadOfRetryingForever() {
   assert.deepEqual([...held.strikeHeld], ["flooring installation"], "the pass must name what it held back");
   const afterHeld = await store.local.get({ sheetsStatus: null });
   assert.match(afterHeld.sheetsStatus?.notice || "", /Held back/, "the status must explain the stand-down instead of looking idle");
+  assert.ok(store.data.scanRetryAfter?.[queued[0].searchKey], "a held keyword needs a durable automatic retry time");
+  await store.local.set({ scanRetryAfter: { [queued[0].searchKey]: new Date(Date.now() - 1000).toISOString() } });
+  const resumed = await context.runSheetsAutomation({ force: true });
+  assert.equal(resumed.startedJob, true, "a failed page resumes automatically after backoff without pressing Start");
+  assert.equal(store.data.runState, "running");
+  tabs.length = 0;
+  await store.local.set({ scanJobs: {}, scanJob: null, scanErrorStrikes: { [queued[0].searchKey]: 3 },
+    scanRetryAfter: { [queued[0].searchKey]: new Date(Date.now() + 300_000).toISOString() } });
 
   const human = await context.runSheetsAutomation({ force: true, interactive: true });
   assert.equal(human.startedJob, true, "a human request always gets one more attempt");
@@ -4167,6 +4238,7 @@ function testTransientRephraseFailureIsRetriedLater() {
     ["collecting card ignores page detection", testCollectingCardIgnoresPageDetection],
     ["stale running jobs release their slot", testStaleRunningJobsReleaseTheirSlot],
     ["closing the runner tab ends its job", testClosingTheRunnerTabEndsItsJob],
+    ["collection survives closed sidebar and worker restart", testCollectionSurvivesPanelCloseAndWorkerRestart],
     ["dead pages stand down instead of retrying forever", testDeadPagesStandDownInsteadOfRetryingForever],
     ["concurrent jobs and late heartbeat", testConcurrentJobUpdatesAndLateHeartbeat],
     ["new reviews trigger coalesced sync", testNewReviewsTriggerCoalescedSync],
@@ -4202,6 +4274,7 @@ function testTransientRephraseFailureIsRetriedLater() {
     ["JPEG download URLs preserve queries", testJpegDownloadUrlsPreserveQueries],
     ["Sheet repairs upgraded review photos", testSheetRepairsUpgradedReviewPhotos],
     ["connector setup", testConnectorSetup],
+    ["reconnect preserves collection and saved connection", testReconnectPreservesCollectionAndConnection],
     ["connector version observations remain scoped after restart", testConnectorVersionObservationSurvivesRestartWithoutCrossingSheets],
     ["optional version metadata never fails the connection", testOptionalVersionMetadataFailureDoesNotFailAConnection],
     ["connecting recovers an older secret", testConnectingRecoversAnOlderSecret],

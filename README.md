@@ -226,6 +226,20 @@ Fudge has exactly **one switch**; the two buttons at the top of the side panel a
 
 **Stop collecting** — ends every running scan, closes Fudge's tabs, switches automation off. Reviews already collected stay saved and each scan's position is kept in **Search Progress**, so restarting resumes rather than repeating.
 
+**Closing the sidebar with × does not stop collection.** The background worker and
+Google runner tabs continue while Chrome is open, independently of the sidebar.
+Reopening the sidebar reads the saved running/stopped state; it never starts or
+stops work. Chrome shutdown or computer sleep pauses browsing until Chrome runs
+again. An explicit **Disconnect** removes the Sheet connection and disables Sheet
+automation; it is not the same as closing the sidebar.
+
+Retesting/reconnecting the same Sheet preserves the current collection state;
+failed reconnect attempts keep the last saved connection for retries. A first
+connection or switch to a different Sheet still waits for Start. After three
+fruitless page errors, the affected keyword backs off for five minutes and retries
+automatically rather than remaining held forever. Google's longer block cooldowns
+are still respected, and Stop prevents all new automatic scans.
+
 Manual buttons skip all cooldowns: side panel *Fill rows now*, *Rephrase now*, *Sync now*, *Repair*; Sheet menu *Fudge → Rephrase now / Fill rows now / Test rephrasing / Rephrasing status*.
 
 ### Retry behavior that matters
