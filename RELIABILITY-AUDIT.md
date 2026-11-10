@@ -799,3 +799,31 @@ the stale healthy state on top (`sidepanel.js` `render()` used to treat
 Runner tabs from before the reload are still running the old content script, as
 documented in section M — close any Google tabs Fudge had open before pressing
 Start again.
+
+## R. A keyword with no Cities tab entries, dead for good (2.0.3)
+
+**Observed:** a keyword's Structure rows stay on *Waiting for reviews* /
+*Waiting for Drive pictures* indefinitely; Start shows **Connected** but opens
+no Google tab for that keyword at all.
+
+**Cause.** `resolveTarget` (`sheets.js`) has two branches: a Structure row with
+a city, or a shuffled rotation across the Cities tab. With the Cities tab
+completely empty, neither applies — the keyword falls into the no-city branch,
+which has only one search key (`service|""|mode`) and no other city to rotate
+to. Once that single search reaches the four-page cap it is written to
+`Search Progress` as **Exhausted**, and with nothing else to try, that keyword
+could never be searched again — not a retry, a permanent dead end, even though
+Google keeps indexing new businesses and new reviews over time. The panel's
+"Every city is used up — add more cities" notice is correct but easy to miss
+for an operator who never intended to fill in the Cities tab at all.
+
+**Fixed.** The no-city branch now remembers the exhausted key's `Updated At`.
+Within `NO_CITY_RETRY_MS` (seven days) it is still reported as exhausted, same
+as before. Past that window, Fudge retries it from page 1: the stored
+`Search Progress` row is reset (page 1, `Exhausted` back to `No`, visited
+businesses cleared) in the same sync that queues the job, so `writeProgress`'s
+no-regression rule — which exists to stop a stale checkpoint moving a live
+scan backwards — cannot mistake the restart's own fresh checkpoint for one.
+Nothing changes for a keyword that actually has cities configured; this only
+ever applies to the single blank-city key. Two new smoke tests cover staying
+blocked inside the window and resetting correctly once it has passed.

@@ -27,6 +27,12 @@ const SheetsService = (() => {
   // Conditions that resolve by themselves. These are not the user's problem and are
   // never shown as "Needs attention": Fudge is already going to try again.
   const transientError = (message = "") => /busy rephrasing|did not answer in time|did not finish loading|lock timeout|holding the lock|another fudge|network|failed to fetch|temporarily|rate|try again|429|50[0234]/i.test(String(message));
+  // With no Cities tab filled in, a keyword's blank-city search is the ONLY route
+  // Fudge has for it. Once that one search reaches the page cap it is marked
+  // Exhausted — and with no other city to rotate to, "exhausted" used to mean
+  // "never searched again", forever, even though Google keeps adding businesses
+  // and reviews over time. Retry it periodically instead of leaving it dead.
+  const NO_CITY_RETRY_MS = 7 * 24 * 60 * 60 * 1000;
   const softError = (message) => {
     const error = new Error(message);
     error.transient = true;
@@ -937,7 +943,11 @@ const SheetsService = (() => {
         }
         if (!cities.length) {
           const key = searchKey(deficit.service, "", deficit.mode);
-          return isExhausted(key) ? null : { name: "", key };
+          if (!isExhausted(key)) return { name: "", key };
+          const entry = progressByKey.get(key);
+          const updatedAt = Date.parse(entry?.row[8] || "");
+          if (!entry?.rowNumber || !Number.isFinite(updatedAt) || Date.now() - updatedAt < NO_CITY_RETRY_MS) return null;
+          return { name: "", key, freshRetry: true, rowNumber: entry.rowNumber };
         }
         const available = cities.map((city) => {
           const key = searchKey(deficit.service, city.name, deficit.mode);
@@ -978,6 +988,11 @@ const SheetsService = (() => {
       // nothing is waiting. The sort is stable, so the Structure row order still
       // decides priority inside each group.
       const ordered = [...deficits.values()].sort((a, b) => Number(b.unfilled > 0) - Number(a.unfilled > 0));
+      // A fresh retry of an exhausted no-city keyword must not look behind its own
+      // old checkpoint (page 4, every business visited) or writeProgress's
+      // no-regression rule would silently drop the restart's own checkpoint
+      // writes. Reset the stored row to page 1 up front instead.
+      const progressResets = [];
       for (const deficit of ordered) {
         if (deficit.amount <= 0) continue;
         const keywordKey = Fudge.normalize(deficit.service);
@@ -999,11 +1014,15 @@ const SheetsService = (() => {
           exhaustedEverywhere.push(deficit.service);
           continue;
         }
-        const progress = progressByKey.get(target.key)?.row || [];
+        const progress = target.freshRetry ? [] : (progressByKey.get(target.key)?.row || []);
+        if (target.freshRetry) {
+          progressResets.push({ range: `'Search Progress'!A${target.rowNumber}:I${target.rowNumber}`, values: [[target.key, deficit.service, "", Fudge.buildSearchQuery(deficit.service, ""), 1, 0, "No", "", now()]] });
+        }
         claimedKeywords.add(keywordKey);
         nextJobs.push({ auto: true, searchKey: target.key, serviceKeyword: deficit.service, city: target.name, reviewMode: deficit.mode, targetCount: deficit.amount, query: Fudge.buildSearchQuery(deficit.service, target.name), currentPage: Math.max(1, Number(progress[4]) || 1), businessIndex: Math.max(0, Number(progress[5]) || 0), visitedPlaceIds: clean(progress[7]).split("|").filter(Boolean) });
         if (nextJobs.length >= jobLimit) break;
       }
+      if (progressResets.length) await batchWrite(spreadsheetId, progressResets);
       // Fewer short keywords than tabs used to leave tabs unopened: four tabs set,
       // two keywords waiting, two tabs. A spare tab now takes one of those keywords
       // in another city, and the keyword's target is shared between its tabs so

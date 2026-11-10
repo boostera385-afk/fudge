@@ -1,8 +1,8 @@
-# fudge 2.0.1 — Google Review Collector & Sheets Fulfillment
+# fudge 2.0.3 — Google Review Collector & Sheets Fulfillment
 
 <p align="center">
   <img src="https://img.shields.io/badge/Chrome%20%2F%20Edge-Manifest%20V3-4285F4?logo=googlechrome&logoColor=white" alt="Chrome / Edge — Manifest V3">
-    <img src="https://img.shields.io/badge/version-2.0.1-brightgreen" alt="Version 2.0.1">
+    <img src="https://img.shields.io/badge/version-2.0.3-brightgreen" alt="Version 2.0.3">
   <img src="https://img.shields.io/badge/language-JavaScript-f7df1e?logo=javascript&logoColor=black" alt="JavaScript">
   <img src="https://img.shields.io/badge/dependencies-none-success" alt="Zero dependencies">
   <img src="https://img.shields.io/badge/backend-Google%20Sheets%20%2B%20Apps%20Script-34A853?logo=googlesheets&logoColor=white" alt="Google Sheets + Apps Script">
@@ -13,7 +13,7 @@
 
 For the complete cross-system implementation guide, start with the [Fudge + ND Master Automation Plan](docs/MASTER-AUTOMATION-PLAN.md). It covers ingestion, cleanup, approval, Sheets, local execution, profiles, checks, comments, controlled reposting, recovery and phased acceptance. This is a plan, not delivered end-to-end automation.
 
-**Release candidate, not a client live-acceptance certificate.** Extension **2.0.1**
+**Release candidate, not a client live-acceptance certificate.** Extension **2.0.3**
 ships connector template **45**. Open **versions** in the sidebar, library or setup
 page for the actual extension version, expected connector and last observed remote
 version/time. A cached response is not a fresh connection test. The unpacked ID
@@ -454,7 +454,7 @@ evidence that a job occurred or a transferable customer endorsement.
 
 ## 🧾 Versioning & tags
 
-- Extension version lives in `manifest.json` — current: **`2.0.1`**.
+- Extension version lives in `manifest.json` — current: **`2.0.3`**.
 - Connector template version lives in `apps-script.gs` as `FUDGE_CONNECTOR_VERSION`; the extension's expectation in `sheets.js` as `REQUIRED_CONNECTOR_VERSION`.
 - Git releases are tagged `v<version>` matching the manifest (e.g. [`v2.0`](https://github.com/boostera385-afk/fudge/releases)), so a connected Sheet's connector version can always be diffed against the template it came from.
 

@@ -1351,6 +1351,35 @@ async function testAllCitiesExhausted() {
   assert.deepEqual([...result.exhaustedEverywhere], ["flooring installation"]);
 }
 
+// With no Cities tab at all, the blank-city search is the ONLY route a keyword
+// has. Marking it Exhausted forever would mean it can never be searched again,
+// even though Google keeps adding businesses/reviews over time. A recent
+// exhaustion still blocks it...
+async function testNoCityExhaustionStaysBlockedWhileRecent() {
+  const structureRows = [["REQ-2", "With Picture", "flooring installation", ""]];
+  const progressRows = [progressRow("flooring installation", "", "photo", { exhausted: true, updatedAt: new Date(Date.now() - 60_000).toISOString() })];
+  const { result, valueUpdates } = await runSheetsSync({ structureRows, reviewRows: [], progressRows, cityRows: [] });
+  assert.equal(result.nextJob, null, "a recently exhausted no-city keyword stays blocked");
+  assert.deepEqual([...result.exhaustedEverywhere], ["flooring installation"]);
+  assert.equal(valueUpdates.find((item) => item.range === "'Search Progress'!A2:I2"), undefined, "no reset is written while still within the retry window");
+}
+
+// ...but one exhausted long enough ago is retried from page 1, with its stored
+// checkpoint reset up front so writeProgress's no-regression rule cannot discard
+// the restart's own checkpoint writes.
+async function testNoCityExhaustionRetriesAfterAWhile() {
+  const structureRows = [["REQ-2", "With Picture", "flooring installation", ""]];
+  const progressRows = [progressRow("flooring installation", "", "photo", { exhausted: true, page: 4, business: 11, updatedAt: new Date(Date.now() - 8 * 24 * 60 * 60 * 1000).toISOString() })];
+  const { result, valueUpdates } = await runSheetsSync({ structureRows, reviewRows: [], progressRows, cityRows: [] });
+  assert.ok(result.nextJob, "a long-exhausted no-city keyword must be retried rather than left dead");
+  assert.equal(result.nextJob.currentPage, 1, "the retry starts over from page 1");
+  assert.equal(result.nextJob.businessIndex, 0, "the retry forgets the old business position");
+  assert.deepEqual([...result.exhaustedEverywhere], [], "a retried keyword is not reported as stuck");
+  const reset = valueUpdates.find((item) => item.range === "'Search Progress'!A2:I2");
+  assert.ok(reset, "the stored checkpoint is reset up front so the restart is never seen as behind");
+  assert.equal(reset.values[0][6], "No", "the stored row no longer claims to be exhausted");
+}
+
 // Exhaustion is mirrored onto the Cities tab, and only changed rows are written.
 async function testCitiesTabMirrorsExhaustion() {
   const structureRows = [["REQ-2", "With Picture", "flooring installation", ""]];
@@ -4498,6 +4527,8 @@ function testDeadSidePanelNamesTheDeadWorker() {
     ["a checkpoint never moves backwards", testACheckpointNeverMovesBackwards],
     ["cities take turns and resume where they stopped", testCitiesTakeTurnsAndResumeWhereTheyStopped],
     ["all cities exhausted", testAllCitiesExhausted],
+    ["no-city exhaustion stays blocked while recent", testNoCityExhaustionStaysBlockedWhileRecent],
+    ["no-city exhaustion retries after a while", testNoCityExhaustionRetriesAfterAWhile],
     ["Cities tab mirrors exhaustion", testCitiesTabMirrorsExhaustion],
     ["Structure city overrides list", testStructureCityOverridesList],
     ["keyword needs evidence in review", testKeywordNeedsEvidenceInTheReview],
