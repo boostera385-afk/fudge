@@ -714,6 +714,32 @@
     return response?.job || { ...(currentJob || {}), ...patch };
   };
   const finishJob = async (patch) => chrome.runtime.sendMessage({ type: "SCAN_JOB_COMPLETE", patch }).catch(() => null);
+  // A captcha or "unusual traffic" interstitial can be cleared by a person sitting
+  // at the tab in well under a minute. Calling finishJob the instant one appears
+  // used to end the run before anyone had a chance to click through it, and the
+  // global Google cooldown it triggers then kept every other tab idle too — even
+  // though the block was already gone. This gives a human-sized window to clear it
+  // in place before the tab is written off as genuinely blocked. The job is never
+  // marked complete while this is waiting, so if solving it causes a navigation
+  // instead of clearing in place, the fresh content script's own GET_SCAN_JOB
+  // resume (bottom of this file) picks the still-"running" job back up.
+  const CAPTCHA_GRACE_MS = 2 * 60 * 1000;
+  const waitForManualClearance = async (job) => {
+    await updateJob({
+      stage: "Blocked by Google — solve the check in this tab; Fudge will continue automatically",
+      businessIndex: job.businessIndex || 0
+    });
+    const started = Date.now();
+    while (Date.now() - started < CAPTCHA_GRACE_MS) {
+      if (extensionGone() || await jobWasStopped(job.id)) return false;
+      if (!googleBlockPage()) {
+        await updateJob({ stage: "Verification cleared — resuming" });
+        return true;
+      }
+      await sleep(1000);
+    }
+    return false;
+  };
   const saveBatch = async (result, job) => {
     const { sheetKnownReviewIds = [], sheetKnownReviewFingerprints = [], sheetKnownReviewContentKeys = [], activeServiceKeywords = [], serviceRules = [] } = await chrome.storage.local.get({ sheetKnownReviewIds: [], sheetKnownReviewFingerprints: [], sheetKnownReviewContentKeys: [], activeServiceKeywords: [], serviceRules: [] });
     Fudge.setServiceRules(serviceRules);
@@ -856,6 +882,7 @@
       }
       while (true) {
         if (googleBlockPage()) {
+          if (await waitForManualClearance(job)) continue;
           // Stop here without recording progress: businessIndex and visitedPlaceIds
           // stay exactly where they were so this work is retried, not written off.
           await finishJob({ stage: "Blocked by Google", blocked: true, businessIndex: job.businessIndex || 0 });
@@ -873,6 +900,12 @@
         for (let index = job.businessIndex || 0; index < targets.length; index += 1) {
           if (await jobWasStopped(job.id)) return;
           if (googleBlockPage()) {
+            if (await waitForManualClearance(job)) {
+              // Retry this same business once the block clears; the for-loop's
+              // own increment brings index back to where it already was.
+              index -= 1;
+              continue;
+            }
             await finishJob({ stage: "Blocked by Google", blocked: true, businessIndex: index });
             return;
           }
@@ -886,6 +919,10 @@
           let panel = await openBusinessAt(index);
           if (!panel.opened) {
             if (googleBlockPage()) {
+              if (await waitForManualClearance(job)) {
+                index -= 1;
+                continue;
+              }
               await finishJob({ stage: "Blocked by Google", blocked: true, businessIndex: index });
               return;
             }
