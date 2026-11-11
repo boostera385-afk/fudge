@@ -1,6 +1,169 @@
 # Fudge + ND Master Automation Implementation Guide
 
-Plan version: 1.0 | Updated: 2026-10-28 | Status: proposed implementation, not delivered automation.
+Plan version: 1.1 | Updated: 2026-11-11 | Status: updated plan, not delivered automation.
+
+**Implementation authorized: 11 November 2026.** The user approved saving this
+dated plan and starting local implementation using best practices. Implement and
+validate with local fixtures first. Live testing follows completion and separate
+approval; no live publishing, Sheet writes, remote migrations, deployment, commit
+or push is authorized by this approval. Track delivered slices and open gates in
+`IMPLEMENTATION-STATUS.md`; do not turn target dates into completion claims.
+
+**Local source follow-up: 11 November 2026.** The clean-Sheet path now includes
+dated import/approval/finite profile batches, pre-staged image descriptors,
+one-profile status/comment queries, isolated dated-layout result delivery,
+batch progress/filters and a screened laptop source-package builder. Six additive
+local migrations and reviewed connector/laptop/web changes require separate rollout.
+This is source/fixture completion for that narrow workflow, not a deployed product,
+live-platform acceptance or full F01–F36 desktop replacement. See
+`DAILY-ROLLOUT-20261111.md` in the dashboard repository before any live test.
+
+## Current priority — simple connected-Sheet workflow (11 November 2026)
+
+This dated update sets the next delivery priority. The broader architecture and
+feature inventory below remain reference/backlog, not extra daily employee steps.
+Internal-tool simplicity means hiding technical setup, not removing existing
+account checks, exact-profile ownership or duplicate-post protection.
+
+### The daily flow the user wants
+
+```text
+Paste clean content into the existing connected Sheet
+  → Dashboard: Load Sheet → choose date/profiles → review → Start posting
+  → Profile A: its 15–20 approved posts, one post at a time
+  → Profile B: its 15–20 approved posts, only after A finishes
+  → Results: exact links, actual posting times and any problems
+
+Next business day:
+Results → Yesterday (or another date) → one profile → Check posts & comments
+  → exact saved links checked sequentially → statuses and comment counts updated
+```
+
+Fudge can remain the upstream collection/cleanup tool. Its disabled ND uploader is
+**not a prerequisite** for this clean-Sheet path. Do not require another workbook,
+a duplicate Fudge setup or daily manual re-entry of posts into the dashboard.
+
+### One-time setup, then only three daily destinations
+
+- Admin maps the existing tab/dated sections, content, account and picture columns
+  once, including the existing `Issues` link column. Save all mappings with the
+  workspace connection; no hosting-variable edits for ordinary use.
+- Admin resolves each Sheet account name to an exact Incogniton UUID, customer
+  and laptop once. Duplicate/unmatched names require a choice, not a guess.
+- Prepare one laptop launcher that can run the authorized posting or checking
+  mode. Existing **Start profile helper** runs profile tasks only; connecting
+  publishing/monitoring to a guided launcher is remaining work, not delivered.
+- Daily destinations: **Sheet / Posting**, **Run**, **Results**. Keep existing
+  routes and put profile setup, credentials and diagnostics under Settings.
+- Start work once. One reviewed **Start posting** confirmation authorizes the
+  selected exact batch; no separate approval click for each of its 15–20 rows.
+  A Windows startup prompt or a genuine login/verification problem may still
+  need a person. Internal use does not make a browser challenge disappear.
+
+### Sheet input and automatic output
+
+| Existing input | Meaning |
+|---|---|
+| Account Name | Saved profile mapping; required for a runnable row. |
+| Final Rephrasing / mapped clean-content column | Full final post body, preserved without truncation or automatic rewriting. |
+| Pictures | Optional approved image references in the reviewed order; blank means text-only. |
+| Date banner / chosen plan date | Select the intended work; never pretend it is the actual posting time. |
+| Service / Area / State | Existing task metadata; not evidence of account residence. |
+
+The current section reader returns metadata/one-line titles and excludes pictures;
+it is **not** a publishing importer. Add a separate allowlisted full-content/media
+projection rather than widening every existing metadata read or fetching credentials.
+
+With separate owner approval, add/map stable Row ID and Revision fields once so
+sorting, repeated headers and row moves cannot target the wrong task. Hide these
+technical fields from daily use. Never treat the current row number as identity.
+
+After an actual successful submission save the exact new post link and observed
+submission time to the database first. Deliver mapped Sheet output separately:
+posting status, post link, actual Date Posted, last-check outcome/time and comment
+count. A Sheet failure must not repeat posting. Preserve input content and human
+columns; do not replace Fudge's script. The new dated-layout writeback adapter is
+remaining work; the current legacy-tab writer does not support this workbook.
+
+### Posting/upload scenario: multiple profiles, 15–20 posts each
+
+1. **Load Sheet** shows date sections and profile cards with Ready / Needs fixing /
+   Already recorded counts. Empty/incomplete rows are visible but not runnable.
+2. Choose profiles in the required order. Preview each row's exact text, images,
+   account and audience. **Start posting** freezes those revisions and authorizes
+   that finite batch; later Sheet edits wait for a fresh review.
+3. Group the queue by exact profile: finish A before starting B. One profile and
+   one post upload at a time on the laptop; never interleave checks/publishing or
+   run legacy tasks on that profile simultaneously. The dashboard shows current
+   profile, row, image-upload progress and `completed / selected`, not invented live data.
+4. Download/stage reviewed images once, check availability/type/size/order before
+   dispatch, and verify selected attachments before Submit. No silent text-only
+   fallback, lost pictures or guessed Drive access. Missing pictures block that row
+   visibly; valid rows can be selected separately before Start.
+5. Capture an exact new URL after each post and checkpoint before continuing.
+   An existing Sheet link / recorded successful revision is not posted again.
+   Repeated Load/Start clicks reuse the same batch/jobs. Unknown submit outcome
+   stops the run for review, never a blind repost.
+6. A → B progression must work inside one authorized selection without a new
+   Start click after each post. The current runner caps a run at 20 total jobs,
+   **not 20 per profile**. Add bounded per-profile chunks/continuation for a finite
+   multi-profile batch; do not simply remove the cap or enable endless posting.
+7. Pause/End blocks new posts; an already-started bounded action may finish.
+   Interrupted runs retain receipts and require review of ambiguity. Resume only
+   the same still-authorized batch; session expiry does not auto-release old posts
+   tomorrow. Apply platform-permitted timing and stop for restrictions/challenges.
+
+For the first delivery, correct profile grouping and sequential jobs are required.
+Keeping one browser open for all 20 posts is a later measured optimization only
+if per-post leases/checkpoints/cleanup remain correct; current adapters may reopen
+the same profile between posts. Do not hold several untracked claims in memory.
+
+### Next-day status and comment counts, without posting again
+
+- Reuse Results and date-cohort controls. Default to **Yesterday** in the business
+  timezone; choose any earlier date or **Existing links / unknown posting date**.
+  The date filter uses actual sourced posting times, not Sheet banners.
+- Choose **one profile** and click **Check posts & comments**. Check every eligible
+  saved link in that selection in sequence (e.g. 20), with progress and explicit
+  missing-link/blocked/recent-result counts. Optionally queue other profiles in
+  order, still never simultaneously. Checking never submits or edits a post.
+- Keep filters for All / Alive / Needs review / Not accessible / Login or network
+  problems / Not checked. Confirmed removal needs validated evidence; an inaccessible
+  page is not automatically Deleted. Submission, visibility and Sheet sync stay separate.
+- Per post show link, profile, actual posting date, last check, status,
+  **Comments on page**, **Comments saved** and completeness. Unknown is not zero.
+  Count stable-ID comments once and label partially loaded threads honestly.
+- Profile summary shows tracked posts, checked, alive, needs attention, remaining
+  and reported/saved comments. Comments do not include inbox/unread badge counts.
+  Aggregate totals are unknown/partial when any constituent count is unknown/partial.
+- Previously tracked posts can be checked again without reimport/reposting.
+  Preserve existing freshness/rate limits and reuse active jobs; recent results
+  show their real timestamp rather than pretending a new visit happened.
+- Use server-side profile/date pagination and scoped count queries, not the
+  dashboard's global latest-500-post/latest-1,000-comment window. A selected
+  profile's older posts must not disappear because other profiles posted more.
+
+### Dated delivery sequence — proposed targets, not completion promises
+
+| Target date | Small delivery | Required exit check |
+|---|---|---|
+| 2026-11-11 | Agree this simple scope and record current gaps | Plan updated; no release or live posting implied. |
+| 2026-11-12 | Saved column/profile mapping + dated clean-row import | Existing workbook layout, full text/media, moved rows and missing names covered by fixtures; no extra workbook. |
+| 2026-11-13 | Sheet preview → single reviewed Start → finite grouped queue | Duplicate clicks/Sheet edits cannot silently duplicate or change approved posts. |
+| 2026-11-14 | Guided local start + sequential posting/image integration | Two synthetic profiles × 20 posts; all A before B, no overlap; every exact result saved; no real mass-post test. |
+| 2026-11-15 | Profile/date Results + one-click checks/comments | Two profiles × 20 tracked posts; check one profile only; preserve unknown dates, freshness, counts and partial comments. |
+| 2026-11-16 | Existing-layout result writeback + interruption recovery | Row moves, image failure, lost response, paused/offline helper and Sheet outage cannot repost or corrupt another row. |
+| 2026-11-17 onward | Separately approved small real-account pilot | Owner chooses permitted account/content/media; verify a small upload, exact links, actual next-day checks/comments and Sheet results before expansion. |
+
+Dates move if acceptance fails or setup/approval is unavailable. Live publishing,
+Sheet writes, migrations/deployments and any 15–20-post real-profile volume need
+their own approval and platform suitability; this plan is not that authorization.
+Do not create 40 real posts just to satisfy the synthetic batch test.
+
+**Done means:** paste clean rows once, review/start the selected profiles from the
+dashboard, receive attributable links without duplicates, then select one profile
+the next day and see sourced status/comment results without manually opening each
+post. Until this full path passes, call it planned/partial, not fully automated.
 
 ## 1. Purpose and authority
 
@@ -8,7 +171,7 @@ Unify Fudge collection, cleanup, approval, ND Master, local Incogniton execution
 
 This guide is saved identically in both repositories at `docs/MASTER-AUTOMATION-PLAN.md`. The dashboard copy is the editing authority for cross-system architecture; update the Fudge copy in the same change. Repository instructions and actual implementation-status records remain authoritative for permissions and delivered functionality. This guide does not authorize deployment, paid resources, production writes, commits or live browser actions.
 
-## 2. Reviewed baseline and important limits
+## 2. Historical baseline (2026-10-28) and important limits
 
 Sources: Fudge `docs/RECOMMENDED-WORKFLOW.md`, `docs/SUPABASE-FOUNDATION.md` and raw-ingestion SQL; supplied workbook inspected read-only; dashboard `AGENTS.md`, `docs/IMPLEMENTATION-STATUS.md`, `docs/WORKBOOK-WORKFLOW-REVIEW.md`, `docs/DASHBOARD-PARITY-ROADMAP.md`, `docs/WORKER-BRIDGE.md`, `docs/PUBLISHING-PROTOCOL.md`, Sheet connector documentation and monitoring agent source. No live Sheet, signed-in platform workflow or target database was validated for this plan.
 
